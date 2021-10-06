@@ -92,14 +92,16 @@ class MatchingLoss(tf.keras.layers.Layer):
         iou_metric = tf.reduce_sum(masked_iou)  / total_num_obj
         num_correct_at_50 = tf.math.count_nonzero(tf.math.greater_equal(masked_iou, .50))  
         mAP_50_95 = 0.0
-        r_vals = list(range(.50, 1.00, .05))
+        r_vals = list(range(50, 100, 5))
         for r in r_vals:
-            mAP_50_95 += tf.math.count_nonzero(tf.math.greater_equal(masked_iou, r))  
+            r = r / 100.0
+            mAP_50_95 += tf.cast(tf.math.count_nonzero(tf.math.greater_equal(masked_iou, r)), 
+                                 tf.float32)
 
         num_predicted = tf.math.count_nonzero(tf.math.less(cat_preds[:, 1, ...], .50))  
         
         mAP50 = tf.cast(num_correct_at_50, tf.float32) / tf.cast(num_predicted, tf.float32)
-        mAP_50_95 = tf.cast(num_correct_at_95, tf.float32) / tf.cast(num_predicted*len(r_vals), tf.float32)
+        mAP_50_95 = mAP_50_95 / tf.cast(num_predicted*len(r_vals), tf.float32)
         
         metrics = [iou_metric, mAP50, mAP_50_95] 
         return losses, metrics

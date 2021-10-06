@@ -6,7 +6,6 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 - My model is written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task. 
 
-- It requires only standard dependencies used in most Tensorflow projects, plus a single Scipy function, *linear_sum_assignment*, for bipartite matching. 
 
 - The loss function, metrics, training regime and text tokenization / de-tokenization are all built in. Train by passing an optimizer into model.compile() and then using model.fit() as usual.
 
@@ -30,7 +29,6 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 ## An Idea
 
-The bipartite matching algorithm (*linear_sum_assignment*) speed seems to be the main limiting factor to naively applying DETR's training regime to traditional object detectors. Assignments involving tens of thousands of proposals may add several seconds / batch during training. 
 
 It would be interesting to experiment with a modified CNN training routine where it is fully trained as normal, then training an additional "sifting" layer using bipartite matching to replace NMS in weeding out predictions.
 
@@ -46,7 +44,7 @@ RNN's with Attention had become the defacto standard for NLP tasks. These, howev
 
 #### Transformers in Image Captioning
 
-State of the Art Image processing using Convolutional Neural Networks do not suffer from NLP's previous lack of parallelism, removing one of the main benefits of switching to transformers. In addition, transformers have an enormous memory footprint compared to CNNs, and they lack CNNs natural sense of spacial positioning. 
+State of the Art Image processing using Convolutional Neural Networks do not suffer from NLP's previous lack of parallelism, removing one of the main benefits of switching to transformers. In addition, transformers have an enormous memory footprint compared to CNNs, and they lack CNNs natural sense of spacial positioning.
 
 The most likely benefit of transformers would be for tasks involving both image processing and NLP, such as imaging captioning. [*Show, Attend and Tell: Neural Image Caption Generation with Visual Attention*](https://proceedings.mlr.press/v37/xuc15.pdf) (2015) had already used a hybrid approach connecting a CNN encoder with an RNN decoder. Replacing the RNN with Transformers as a natural extension.
 
@@ -54,13 +52,13 @@ The most likely benefit of transformers would be for tasks involving both image 
 
 #### Transformers in Object Detection
 
-Attempting to use tranformers in object detectoin is a *significantly* more difficult task that in captioning or classification. The main problem is that state of the art detectors achieve success only by generating huge numbers of proposed object detections (often in the tens of thousands), and then weeding them down to single or double digit number of predictions with techniques such as Non-Max Suppression. Transformers simply take up too much memory to handle such a large numbers of object proposals. 
+Attempting to use tranformers in object detectoin is a *significantly* more difficult task that in captioning or classification. The main problem is that state of the art detectors achieve success only by generating huge numbers of proposed object detections (often in the tens of thousands), and then weeding them down to single or double digit number of predictions with techniques such as Non-Max Suppression. Transformers simply take up too much memory to handle such a large numbers of object proposals.
 
 #### DETR's Object Detection Solution
 
-Instead of producing thousands of bad predictions and whittling them down to a few good predictions, DETR directly predicts <= 100 high quality object detections using a novel take on the CNN Encoder --> Transformer Encoder --> Transformer Decoder framework. 
+Instead of producing thousands of bad predictions and whittling them down to a few good predictions, DETR directly predicts <= 100 high quality object detections using a novel take on the CNN Encoder --> Transformer Encoder --> Transformer Decoder framework.
 
-The decoder trains 100 detector objects, vectors whose role is to interact with the encoder through joint-attention and produce a single object prediction. Once trained, these detectors are fixed inputs to the Transformer Decoder, constants entirely independent of the image encodings they will interact with. This design as independent constants allows them to be trained in parallel without masking. 
+The decoder trains 100 detector objects, vectors whose role is to interact with the encoder through joint-attention and produce a single object prediction. Once trained, these detectors are fixed inputs to the Transformer Decoder, constants entirely independent of the image encodings they will interact with. This design as independent constants allows them to be trained in parallel without masking.
 
 DETR also replaces the non-trained techniques such as non-max suppression (NMS) with a fully trainable "end-to-end" process using bipartite matching. The result is an object detector that is the new state of the art for larger objects, but lags behind the top CNN-only models with smaller objects.
 
@@ -72,7 +70,7 @@ The model expects inputs values to be provided as dictionary of tensors. (Any va
 
 #### Mandatory Inference Key
 - **'image'**: RGB image tensors scaled into [0,1]. shape = [batch, height, width, 3]
-  
+
 #### Mandatory Training Keys (in addition to inference keys)
 - **'num_boxes'**: integer value of shape [batch, 1] indicating the number of target objects in the image
 - **'bbox'**: floats (ymin, xmin, ymax, xmax) as scaled box coordinate values in [0,1] with shape [batch, padded_num_boxes, 4]. Any float value can be used for padding.
@@ -86,12 +84,11 @@ The model expects inputs values to be provided as dictionary of tensors. (Any va
 - **num_object_preds:** max number of predictions model is capable of outputing. The DETR paper suggests this will need to be much larger that the max number of objects in a picture. (2x as many in the examples they provided).
 - **image_size:** size images will be resized to for the CNN encoder. (This need not be the size of input images)
 - **num_encoder_blocks:** int >= 0. Number of encoder transformer blocks. Use 0 to skip to only use CNN encoder.
-- **num_encoder_heads:** int >=1. Number of encoder transformer heads. 
-- **encoder_dim:** int multiple of number of encoder heads >=1. 
-- **num_decoder_blocks:** int >=1. Number of decoder transformer heads. 
-- **num_decoder_heads:** int >=1. Number of decoder transformer heads. 
-- **decoder_dim:** int multiple of number of decoder heads >=1. 
+- **num_encoder_heads:** int >=1. Number of encoder transformer heads.
+- **encoder_dim:** int multiple of number of encoder heads >=1.
+- **num_decoder_blocks:** int >=1. Number of decoder transformer heads.
+- **num_decoder_heads:** int >=1. Number of decoder transformer heads.
+- **decoder_dim:** int multiple of number of decoder heads >=1.
 - **num_panoptic_heads:** (not yet implemented. Can pass None)
 - **panoptic_dim:** (not yet implemented. Can pass 0)
 - **vocab_dict:** Dictionary of form {'category': nonempty list of strings, 'attribute': potentially empty list of strings}. Do not include padding or mask values in these lists.
-

@@ -178,13 +178,6 @@ class ClothingPredictor(tf.keras.Model):
                 att_loss = att_loss + att_loss_i
                 box_loss = box_loss + box_loss_i
                 exist_loss = exist_loss + exist_loss_i
-
-                # accumulate metrics
-                iou_metric_i, mAP50_i, mAP95_i = metrics_i 
-
-                #iou_metric = iou_metric + iou_metric_i
-                #mAP50 = mAP50 + mAP50_i
-                #mAP95 = mAP95 + mAP95_i
           
         if training:
             # collect predictions (from final step)
@@ -198,9 +191,11 @@ class ClothingPredictor(tf.keras.Model):
             self.add_metric(exist_loss, 'Existence_Loss')  
 
             # report metrics (only from final step)
+            iou_metric_i, mAP50_i, mAP_50_95 = metrics_i 
+            
             self.add_metric(iou_metric_i, 'IOU')  
             self.add_metric(mAP50_i, 'mAP_50')  
-            self.add_metric(mAP95_i, 'mAP_95')  
+            self.add_metric(mAP_50_95, 'mAP_50_95')  
 
             return loss, y_true, y_pred
 
