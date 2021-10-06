@@ -1,15 +1,16 @@
 # DETR for Tensorflow
 
-This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. 
+This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko.
 
 #### Notes:
 
-- My model is written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task. 
+- My model is written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task.
 
+- It requires only standard dependencies used in most Tensorflow projects, plus a single Scipy function, *linear_sum_assignment*, for bipartite matching.
 
 - The loss function, metrics, training regime and text tokenization / de-tokenization are all built in. Train by passing an optimizer into model.compile() and then using model.fit() as usual.
 
-- I modified the standard DETR architecture to accept both classes (exactly one per object) and subclasses (0 or more per object), allowing the option for fine-grained object descriptions. Panoptic segmentation has not yet been implemented. 
+- I modified the standard DETR architecture to accept both classes (exactly one per object) and subclasses (0 or more per object), allowing the option for fine-grained object descriptions. Panoptic segmentation has not yet been implemented.
 
 
 ####  Training
@@ -18,10 +19,10 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 - Flush with $300 in free credits from Google Cloud, I fully prepared the model for training on their platform only to discover GPU's are specifically excluded from the offer. I am currently searching for an alternative cloud system to train the model at a reasonable price.
 
-#### Comarisons:
+#### Notes:
 - Although I did **not** make use of their repository, it is worth citing the [official Github Repo](https://github.com/facebookresearch/detr/tree/master) PyTorch implementation, publicly available under Apache License. I did look through their repo to see if they used an alternative to *scipy.optimize.linear_sum_assignment* for performing bipartite matching. (They did not.) 
 
-- My model appears to match the official DETR PyTorch implementation's inference and training speeds.
+- Training speed appears comparable to the official DETR PyTorch implementation's inference and training speeds.
 
 - This implemenatation is in stark contrast to the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection), which does not use the standard TF / Keras API for training and customization. Perhaps a deeper dive into their code base will bring clarity for this choice. It appears they are in the process of significantly simplifying their code, but training and model building is still conducted outside standard Tensorflow practices.)
 
@@ -29,6 +30,7 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 ## An Idea
 
+The bipartite matching algorithm (*linear_sum_assignment*) speed seems to be the main limiting factor to naively applying DETR's training regime to traditional object detectors. Assignments involving tens of thousands of proposals may add several seconds / batch during training.
 
 It would be interesting to experiment with a modified CNN training routine where it is fully trained as normal, then training an additional "sifting" layer using bipartite matching to replace NMS in weeding out predictions.
 
