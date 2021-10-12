@@ -19,27 +19,23 @@ class Filepaths:
         if drive_type == 'google_drive':
             archive_base_dir = '/content/drive/MyDrive/datasets/'
             local_base_dir = '/content/datasets/'
-            checkpoint_dir = os.path.join(archive_base_dir, self._dataset_name, 'ModelCheckpoints/')
-            model_files_dir = '/content/drive/MyDrive/GitHub/ShuffleExchange/Shuffle_AI/ModelComponents/'
-            tfrec_files_dir = os.path.join('gs://shuffle-datasets/', self._dataset_name, 'tfrec/')
-
-        elif drive_type == 'google_cloud_storage':
-            archive_base_dir = 'gs://shuffle-datasets/'       
-            local_base_dir = 'gs://shuffle-datasets/'
-            checkpoint_dir = 'gs://shuffle-datasets/ModelCheckpoints/'
-            model_files_dir = 'gs://shuffle-datasets/ModelComponents/'
-            tfrec_files_dir = os.path.join('gs://shuffle-datasets/', self._dataset_name, 'tfrec/')
-            
+            checkpoint_load_dir = os.path.join(archive_base_dir, self._dataset_name, 'ModelCheckpoints/')
+            checkpoint_save_dir = checkpoint_load_dir
+            model_files_dir = '/content/drive/MyDrive/GitHub/DETR_for_TF/ModelComponents/'
+            tfrec_files_dir = None
+           
         else:
             archive_base_dir = input('Enter data archive path: ')
             local_base_dir = input('Enter data extraction path: ')
-            checkpoint_dir = input('Enter checkpoint_dirdirectory: ')
+            checkpoint_load_dir = input('Enter checkpoint load directory: ')
+            checkpoint_save_dir = input('Enter checkpoint save directory: ')
             model_files_dir = input('Enter model files directory: ')
             tfrec_files_dir = input('Enter tfrec files directory: ')
 
         self._archive_base_dir = archive_base_dir
         self._local_base_dir = local_base_dir
-        self._checkpoint_dir = checkpoint_dir
+        self._checkpoint_load_dir = checkpoint_load_dir
+        self._checkpoint_save_dir = checkpoint_save_dir
         self._model_files_dir = model_files_dir
         self._tfrec_files_dir = tfrec_files_dir
 
@@ -49,7 +45,8 @@ class Filepaths:
                       'model_name':self._model_name,
                       'archive_base_dir': self._archive_base_dir,
                       'local_base_dir': self._local_base_dir,
-                      'checkpoint_dir': self._checkpoint_dir,
+                      'checkpoint_load_dir': self._checkpoint_load_dir,
+                      'checkpoint_save_dir': self._checkpoint_save_dir,
                       'model_files_dir': self._model_files_dir,
                       'tfrec_files_dir': self._tfrec_files_dir}
         
@@ -83,6 +80,10 @@ class StrategyOptions:
         if not mixed_precision:
             MIXED_PRECISION_TYPE = None
 
+        # override if necessary
+        if mixed_precision is False:
+            MIXED_PRECISION_TYPE = None
+
         tf.keras.mixed_precision.set_global_policy(MIXED_PRECISION_TYPE)
         self._mixed_precision = MIXED_PRECISION_TYPE
         self._strategy = STRATEGY
@@ -113,7 +114,15 @@ class ModelParameters:
     def dataset_name(self):
         return self._dataset_name    
         
-    def vocab_dict(self):
+    def vocab_dict(self, name=None):
+        COCO_vocab_dict = {'attribute':['<none>'],
+                           'category':['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 
+                                       'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 
+                                       'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 
+                                       'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush']
+        }
+        
+        
         Fashionpedia_vocab_dict = {
             'attribute': ['sweatpants', 'dolman (sleeve), batwing (sleeve)', 'ringer (t-shirt)', 'high low', 'fur', 'single breasted', 'trucker (jacket)', 'skater (dress)', 'hip-huggers (pants)', 'flare', 'wrap (skirt)', 'chevron', 'giraffe', 'tulip (skirt)', 'v-neck', 'double breasted', 'gathering', 'pleat', 'flap (pocket)',
                         'puffer (jacket)', 'zebra', 'toile de jouy', 'metal', 'anorak', 'micro (length)', 'accordion (skirt)', 'puff (sleeve)', 'sheath (skirt)', 'bell (sleeve)', 'duffle (coat)', 'nehru (jacket)', 'cheetah', 'three quarter (length)', 'peacock', 'peasant (top)', 'no waistline', 'jodhpur', 'round (neck)', 'surplice (neck)', 'curved (fit)',
@@ -135,8 +144,13 @@ class ModelParameters:
         }
 
         _vocab_dict = {}
-        _vocab_dict[self._dataset_name] = Fashionpedia_vocab_dict
-        return _vocab_dict
+        _vocab_dict['Fashionpedia'] = Fashionpedia_vocab_dict
+        _vocab_dict['COCO'] = COCO_vocab_dict
+
+        if name:
+            return _vocab_dict[name]
+        else:
+            return _vocab_dict
         
     def default_vocab(self):
         vocab_dict = self.vocab_dict()

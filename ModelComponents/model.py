@@ -8,12 +8,12 @@ import prediction_heads
 import losses_and_metrics
 
 
-class ClothingPredictor(tf.keras.Model):
-    """
-    Note: use Loss class "losses_and_metrics.MatchingLoss" for training. 
-    (This also includes built-in metrics)
 
-    DETR-like model for image captioning.
+class DETR(tf.keras.Model):
+    """
+    Note: Losses are built directly into the model.
+
+    This is a DETR-like model for fine-grained object detection and description.
     DETR is published under the Apache License 2.0. This model was independently
     coded based on the paper "End-to-end Object Detection with Transformers"
     by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, 
@@ -25,7 +25,7 @@ class ClothingPredictor(tf.keras.Model):
                        num_encoder_blocks, num_encoder_heads, encoder_dim, 
                        num_decoder_blocks, num_decoder_heads, decoder_dim, 
                        num_panoptic_heads, panoptic_dim, 
-                       vocab_dict, name='ClothingPredictor', **kwargs):
+                       vocab_dict, name='DETR', **kwargs):
         super().__init__(name=name)
 
         self.num_object_preds = num_object_preds  # ideally >> max objects in training set
@@ -53,7 +53,7 @@ class ClothingPredictor(tf.keras.Model):
         self.EncoderBackbone = backbone.EncoderBackbone(
                                                 image_input_shape=self.image_size, 
                                                 name='EncoderBackbone')
-        self.EncoderBackbone.trainable = False  # lock backbone
+        self.EncoderBackbone.trainable = True  # optional: lock backbone
 
         self.BackboneNeck = backbone.BackboneNeck(encoder_dim=self.encoder_dim, 
                                                   name='BackboneNeck')
@@ -82,9 +82,9 @@ class ClothingPredictor(tf.keras.Model):
 
         # Layers - prediction heads
         self.CategoryPredictionHead = prediction_heads.CategoryPredictionHead(num_categories=self.num_categories,
-                                                             hidden_dim=4*self.decoder_dim, 
-                                                             num_preds=self.num_object_preds,
-                                                             name='CategoryPredictionHead')
+                                                                hidden_dim=4*self.decoder_dim, 
+                                                                num_preds=self.num_object_preds,
+                                                                name='CategoryPredictionHead')
         
         self.AttributePredictionHead = prediction_heads.AttributePredictionHead(num_attributes=self.num_attributes,
                                                                hidden_dim=4*self.decoder_dim,
@@ -122,14 +122,14 @@ class ClothingPredictor(tf.keras.Model):
     def call(self, inputs, training=False):
 
         # get inputs
-        image = inputs['image']
+        image = inputs[0]  #inputs['image']  
 
         if training:
             # prepare targets (if training)       
-            category = inputs['category'] 
-            attribute = inputs['attribute'] 
-            bbox = inputs['bbox'] 
-            num_objects = inputs['num_objects'] 
+            category = inputs[1]  #inputs['category'] 
+            attribute = inputs[2]  #inputs['attribute'] 
+            bbox = inputs[3]  #inputs['bbox'] 
+            num_objects = inputs[4]  #inputs['num_objects'] 
 
             category, attribute = self.Tokenization([category, attribute])  # [batch, num sentences, num_supercats (hot)]        
             y_true = [category, attribute, bbox, num_objects]
@@ -215,8 +215,8 @@ class ClothingPredictor(tf.keras.Model):
     def train_step(self, inputs, apply_grads=True):
 
         with tf.GradientTape() as tape:
-            loss, y_true, y_pred = self(inputs, training=True)
-        
+            loss, y_true, y_pred = self(inputs, training=True)  # losses handled within model call
+                    
         # Compute gradients
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
@@ -240,5 +240,3 @@ class ClothingPredictor(tf.keras.Model):
         by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov 
         and Sergey Zagoruyko, available at 
         https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers.''')
-
-

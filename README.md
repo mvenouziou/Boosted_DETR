@@ -2,11 +2,13 @@
 
 This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko.
 
+My version includes a pre-trainer model, a multi-instance classifier sharing the detection model's weights, except with different prediction heads.
+
 #### Notes:
 
-- My model is written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task.
+- The models are written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task in a single or multi-GPU environment.
 
-- It requires only standard dependencies used in most Tensorflow projects, plus a single Scipy function, *linear_sum_assignment*, for bipartite matching.
+- It requires only common dependencies used for Tensorflow projects, plus a single SciPy function, *linear_sum_assignment*, for bipartite matching. (This SciPy function, unfortunately, prevents the model from TPU training. The official DETR model faces the same issue.)
 
 - The loss function, metrics, training regime and text tokenization / de-tokenization are all built in. Train by passing an optimizer into model.compile() and then using model.fit() as usual.
 
@@ -15,16 +17,14 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 ####  Training
 
-- The official DETR model was intensively trained on 16 high-end GPU's for 3 full days, and neither my computer's integrated Intel graphics nor Google Colab's single GPU are exactly up the task. Unfortunately the model's reliance on reliance on Scipy's *linear_sum_assignment* for bipatite matching is not compatible with Colab TPU training due my . (The official DETR github also relies on this function.)
-
-- Flush with $300 in free credits from Google Cloud, I fully prepared the model for training on their platform only to discover GPU's are specifically excluded from the offer. I am currently searching for an alternative cloud system to train the model at a reasonable price.
+- The official DETR model was intensively trained on 8-16 high-end GPU's for 3 full day. Neither my computer's integrated graphics nor Google Colab's single GPU are exactly up the task, especially at full model size. Flush with $300 in free credits from Google Cloud, I fully prepared the model for training on their platform only to discover GPU's are specifically excluded from the offer. I am currently searching for an alternative cloud system to train the model at a reasonable price.
 
 #### Notes:
-- Although I did **not** make use of their repository, it is worth citing the [official Github Repo](https://github.com/facebookresearch/detr/tree/master) PyTorch implementation, publicly available under Apache License. I did look through their repo to see if they used an alternative to *scipy.optimize.linear_sum_assignment* for performing bipartite matching. (They did not.) 
+- This implementation is in stark contrast to the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection), which does not use the standard TF / Keras model building/training workflow. Perhaps a deeper dive into their code base will bring clarity regarding their choice, which adds significant complexity to implementing their models, especially when customizing to new use cases.
 
-- Training speed appears comparable to the official DETR PyTorch implementation's inference and training speeds.
+- Although I did **not** make use of their repository, it is worth citing the [official Github Repo](https://github.com/facebookresearch/detr/tree/master) PyTorch implementation, publicly available under Apache License. I did look through their repo to see if they used an alternative to *scipy.optimize.linear_sum_assignment* for performing bipartite matching (they did not), and to benchmark my results.
 
-- This implemenatation is in stark contrast to the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection), which does not use the standard TF / Keras API for training and customization. Perhaps a deeper dive into their code base will bring clarity for this choice. It appears they are in the process of significantly simplifying their code, but training and model building is still conducted outside standard Tensorflow practices.)
+- Model speed appears comparable to that of the official DETR PyTorch implementation.
 
 ----
 
@@ -32,7 +32,7 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 The bipartite matching algorithm (*linear_sum_assignment*) speed seems to be the main limiting factor to naively applying DETR's training regime to traditional object detectors. Assignments involving tens of thousands of proposals may add several seconds / batch during training.
 
-It would be interesting to experiment with a modified CNN training routine where it is fully trained as normal, then training an additional "sifting" layer using bipartite matching to replace NMS in weeding out predictions.
+It would be interesting to experiment with a modified CNN training routine where it is fully trained as normal, then fine-tuning with a version of bipartite matching training to remove the model's dependence on NMS.
 
 ----
 

@@ -3,6 +3,7 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np
 
+
 class Pipeline:
     """
     Creates a dataset of image annotations formatted for compatibility with 
@@ -28,10 +29,27 @@ class Pipeline:
     def __init__(self, image_size, **kwargs):
 
         self.target_size = image_size   
-        self.augmentations = Augmentations()
         self.TRANSLATION_TABLE = str.maketrans({'[':None, ']':None, ',':None, "'":None, '"':None, })
 
+        # key labels
+        self.image_path_key = 'image_path'
+        self.image_key = 'image'
+        self.bbox_key = 'bbox'
+        self.category_key= 'category'
+        self.attribute_key = 'attribute'
+        self.num_objects_key = 'num_objects'
+        self.image_id_key = 'image_id'
+
     # Helper functions
+    # Key names
+    def remove_keys(self, val):
+        outputs = val[self.image_key], val[self.category_key], val[self.attribute_key], \
+                    val[self.bbox_key], val[self.num_objects_key], val[self.image_id_key]
+        return outputs
+
+    def without_keys(self, ds):
+        return ds.map(self.remove_keys)
+
     # ## image loaders
     def load_image(self, image_path):
         image_path = tf.squeeze(image_path)
@@ -142,7 +160,7 @@ class Pipeline:
                     y_ds = tf.data.Dataset.from_tensor_slices(y)  # create dataset
 
                 else:  # use placeholder for (unknown) y_true values
-                    y_ds = image_id_ds.map(lambda x: tf.constant([text_pad_val]), 
+                    y_ds = image_id_ds.map(lambda x: tf.tile(tf.constant([[[text_pad_val]]]), [pad_to_num_obj, 1]), 
                                             num_parallel_calls=tf.data.AUTOTUNE)
                 return y_ds
 
@@ -160,8 +178,10 @@ class Pipeline:
                     y_ds = tf.data.Dataset.from_tensor_slices(y)  # create dataset
 
                 else:  # use placeholder for (unknown) y_true values
-                    y_ds = image_id_ds.map(lambda x: tf.constant([text_pad_val]), 
-                                            num_parallel_calls=tf.data.AUTOTUNE)
+                    def pad_vals(val):
+                        return tf.tile(tf.constant([[text_pad_val]]), [pad_to_num_obj,1])
+                    y_ds = image_id_ds.map(pad_vals, num_parallel_calls=tf.data.AUTOTUNE)
+                
                 return y_ds
 
             attribute_ds = create_attribute_ds(labels_df)
@@ -174,9 +194,12 @@ class Pipeline:
                                       attribute_ds, bbox_ds, num_objects_ds))
             
             def map_names(image_path, image_id, category, attribute, bbox, num_objects):
-                return  {'image_path': image_path, 'image_id': image_id, 
-                         'category': category, 'attribute': attribute, 
-                         'bbox': bbox, 'num_objects': num_objects}
+                return  {self.image_path_key: image_path, 
+                         self.image_id_key: image_id, 
+                         self.category_key: category, 
+                         self.attribute_key: attribute, 
+                         self.bbox_key: bbox, 
+                         self.num_objects_key: num_objects}
                 
             ds = ds.map(map_names, num_parallel_calls=tf.data.AUTOTUNE)
 
@@ -189,17 +212,17 @@ class Pipeline:
 
             # decode images into array. (Note: uses tf.io, which requires unbatched images)
             def load(val):
-                image_path = val['image_path']
-                val['image'] = self.load_image(image_path)      
-                del val['image_path']          
+                image_path = val[self.image_path_key]
+                val[self.image_key] = self.load_image(image_path)      
+                del val[self.image_path_key]          
                 return val
 
             ds = ds.map(load, num_parallel_calls=tf.data.AUTOTUNE)
             
             if decode_images:
                 def decoder(val):
-                    image = val['image']
-                    val['image'] = self.decode_one_image(image)
+                    image = val[self.image_key]
+                    val[self.image_key] = self.decode_one_image(image)
                     return val
 
                 ds = ds.map(decoder, num_parallel_calls=tf.data.AUTOTUNE)
@@ -235,9 +258,13 @@ class Pipeline:
                                       placeholder_ds, placeholder_ds, placeholder_ds))
 
             # name the elements for interpretability
-            def map_names(image_path, image_id, a, b, c, d):
-                return  {'image_path': image_path, 'image_id': image_id, 
-                         'category_ds': a, 'attribute': b, 'bbox': c, 'num_objects':d}
+            def map_names(image, image_id, a, b, c, d):
+                return  {self.image_key: image, 
+                         self.image_id_key: image_id, 
+                         self.category_key: a, 
+                         self.attribute_key: b, 
+                         self.bbox_key: c, 
+                         self.num_objects_key: d}
    
             ds = ds.map(map_names, num_parallel_calls=tf.data.AUTOTUNE)
 
@@ -248,9 +275,19 @@ class Pipeline:
 
 
 # Image Augmentations for Training Data
-class Augmentations:
+class Augmentations(Pipeline):
     def __init__(self):
-        pass
+        super().__init__(image_size=None)
+        
+        """  inherited values
+        self.image_path_key = 'image_path'
+        self.image_key = 'image'
+        self.bbox_key = 'bbox'
+        self.category_key= 'category'
+        self.attribute_key = 'attribute'
+        self.num_objects_key = 'num_objects'
+        self.image_id_key = 'image_id'
+        """
 
     def random_downsizer_with_pad(self, image, bbox):
         """ Randomly shrinks image (doesn't preserve aspect ratio), shifts it
@@ -328,48 +365,57 @@ class Augmentations:
 
         # random_downsizer_with_pad. 
         def temp_mapper(val):
-            image = val['image']
-            bbox = val['bbox']
-            val['image'], val['bbox'] = self.random_downsizer_with_pad(image, bbox)
+            image = val[self.image_key]
+            bbox = val[self.bbox_key]
+            val[self.image_key], val[self.bbox_key] = self.random_downsizer_with_pad(image, bbox)
             return val
         
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
         
         # random_contrast
         def temp_mapper(val):
-            image = val['image']
-            val['image'] = self.random_contrast(image)
+            image = val[self.image_key]
+            val[self.image_key] = self.random_contrast(image)
             return val
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
 
         # random_brightness
         def temp_mapper(val):
-            image = val['image']
-            val['image'] = self.random_brightness(image)
+            image = val[self.image_key]
+            val[self.image_key] = self.random_brightness(image)
             return val
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
 
         # random_quality
         def temp_mapper(val):
-            image = val['image']
-            val['image'] = self.random_quality(image)
+            image = val[self.image_key]
+            val[self.image_key] = self.random_quality(image)
             return val
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
 
         # random_saturation
         def temp_mapper(val):
-            image = val['image']
-            val['image'] = self.random_saturation(image)
+            image = val[self.image_key]
+            val[self.image_key] = self.random_saturation(image)
             return val
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
 
         return dataset
 
-
 class TFRecordsConversions(Pipeline):
     def __init__(self, image_size, **kwargs):
         super().__init__(image_size)
         self.image_size = image_size
+
+        """  inherited values
+        self.image_path_key = 'image_path'
+        self.image_key = 'image'
+        self.bbox_key = 'bbox'
+        self.category_key= 'category'
+        self.attribute_key = 'attribute'
+        self.num_objects_key = 'num_objects'
+        self.image_id_key = 'image_id'
+        """
 
     # TF Records Conversion
     # NOTE: Requires unbatched ds with raw images (i.e. images have not been decoded)
@@ -403,12 +449,12 @@ class TFRecordsConversions(Pipeline):
     # converts single ds element to TF Example
     def serialize_example(self, bbox, attribute, category, num_objects, image_id, image):
 
-        feature = {'bbox': self._non_flat_feature(bbox),
-                   'attribute': self._non_flat_feature(attribute),
-                   'category': self._non_flat_feature(category),
-                   'num_objects': self._int64_feature(num_objects),
-                   'image_id': self._int64_feature(image_id),
-                   'image': self._bytes_feature(image)
+        feature = {self.bbox_key: self._non_flat_feature(bbox),
+                   self.attribute_key: self._non_flat_feature(attribute),
+                   self.category_key: self._non_flat_feature(category),
+                   self.num_objects_key: self._int64_feature(num_objects),
+                   self.image_id_key: self._int64_feature(image_id),
+                   self.image_key: self._bytes_feature(image)
             }
 
         feature = tf.train.Features(feature=feature)
@@ -417,12 +463,12 @@ class TFRecordsConversions(Pipeline):
         return example_proto.SerializeToString()
 
     def remove_labels(self, val):
-        bbox = val['bbox']
-        attribute = val['attribute']
-        category = val['category']
-        num_objects = val['num_objects']
-        image_id = val['image_id']
-        image = val['image']
+        bbox = val[self.bbox_key]
+        attribute = val[self.attribute_key]
+        category = val[self.category_key]
+        num_objects = val[self.num_objects_key]
+        image_id = val[self.image_id_key]
+        image = val[self.image_key]
 
         return bbox, attribute, category, num_objects, image_id, image
 
@@ -484,21 +530,21 @@ class TFRecordsConversions(Pipeline):
     def parse_one_example(self, example):
         # convert to feature
         feature_description = {
-            'bbox': tf.io.FixedLenFeature([], tf.string, default_value=''),
-            'attribute': tf.io.FixedLenFeature([], tf.string, default_value=''),
-            'category': tf.io.FixedLenFeature([], tf.string, default_value=''),
-            'image_id': tf.io.FixedLenFeature([], tf.int64, default_value=0),
-            'num_objects': tf.io.FixedLenFeature([], tf.int64, default_value=0),
-            'image': tf.io.FixedLenFeature([], tf.string, default_value=''),
+            self.bbox_key: tf.io.FixedLenFeature([], tf.string, default_value=''),
+            self.attribute_key: tf.io.FixedLenFeature([], tf.string, default_value=''),
+            self.category_key: tf.io.FixedLenFeature([], tf.string, default_value=''),
+            self.image_id_key: tf.io.FixedLenFeature([], tf.int64, default_value=0),
+            self.num_objects_key: tf.io.FixedLenFeature([], tf.int64, default_value=0),
+            self.image_key: tf.io.FixedLenFeature([], tf.string, default_value=''),
         }
 
         feature = tf.io.parse_single_example(example, feature_description)
 
         # convert bytestrings back to ragged tensors
-        feature['bbox'] = self.decode_one_float(feature['bbox'])
-        feature['attribute'] = self.decode_one_string(feature['attribute'])
-        feature['category'] = self.decode_one_string(feature['category'])
-        feature['image'] = self.decode_one_image(feature['image'])
+        feature[self.bbox_key] = self.decode_one_float(feature[self.bbox_key])
+        feature[self.attribute_key] = self.decode_one_string(feature['attribute'])
+        feature[self.category_key] = self.decode_one_string(feature[self.category_key])
+        feature[self.image_key] = self.decode_one_image(feature[self.image_key])
 
         return feature
 
