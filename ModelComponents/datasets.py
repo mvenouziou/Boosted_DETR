@@ -253,18 +253,21 @@ class COCOStandard(GetDataset):
 
         if subset == 'train':
             image_dir = '/content/COCO/images/train/train2017'
-            json_filenames = ['/content/COCO/annotations/train/annotations/person_keypoints_train2017.json',
+            json_filenames = ['/content/COCO/annotations/train/annotations/instances_train2017.json',
+                              '/content/COCO/annotations/train/annotations/person_keypoints_train2017.json',
                               '/content/COCO/annotations/train/annotations/captions_train2017.json'
                               ]
 
         elif subset == 'val':
             image_dir = '/content/COCO/images/test/val2017'
-            json_filenames = ['/content/COCO/annotations/train/annotations/person_keypoints_val2017.json',
+            json_filenames = ['/content/COCO/annotations/train/annotations/instances_val2017.json',
+                              '/content/COCO/annotations/train/annotations/person_keypoints_val2017.json',
                               '/content/COCO/annotations/train/annotations/captions_val2017.json'
                              ]
 
-        keypoint_info = self.load_COCO_json(json_filenames[0])
-        #caption_info = self.load_COCO_json(json_filenames[1]) ####################### not yet appropriately coded for this file
+        instance_info = self.load_COCO_json(json_filenames[0])
+        #keypoint_info = self.load_COCO_json(json_filenames[1]) # not yet coded to handle multiple sets
+        #caption_info = self.load_COCO_json(json_filenames[2]) ####################### not yet appropriately coded for this file
 
         # create or load annotations df
         # check for previously prepared ds
@@ -275,11 +278,11 @@ class COCOStandard(GetDataset):
 
         else:  # create df from scratch
             combined_annotations_df = self.create_combined_COCO_detections_df(
-                        keypoint_info['images_df'], keypoint_info['annotations_df'])
+                        instance_info['images_df'], instance_info['annotations_df'])
 
-            combined_annotations_df['image_path'] = combined_annotations_df['file_name'].apply(
-                                                        lambda x: os.path.join(image_dir, x))
-        
+            combined_annotations_df['image_path'] = \
+                combined_annotations_df['file_name'].apply(lambda x: os.path.join(image_dir, x))
+
             # update index to reclaim 'image_id' column
             combined_annotations_df = combined_annotations_df.reset_index().rename(columns={'image_id':'id_num'})
 
@@ -288,8 +291,8 @@ class COCOStandard(GetDataset):
                                                      f'{subset}_combined_annotations_df.json'))
         
         self._prepared_info = {'annotations_df': combined_annotations_df, 
-                               'categories_df': keypoint_info['categories_df'], 
-                               'meta_info': keypoint_info['meta_info']}   
+                               'categories_df': instance_info['categories_df'], 
+                               'meta_info': instance_info['meta_info']}   
 
         # Display info
         print('Returns dictionary with keys:', self._prepared_info.keys())
@@ -321,11 +324,15 @@ class COCOStandard(GetDataset):
         if 'categories' in all_info.keys():
             categories_df = pd.DataFrame(all_info['categories'])
             self._category_indx_to_name = categories_df.set_index('id')['name'].to_dict()
+        else:
+            categories_df = None
 
         # attribute names (Fashionpedia dataset)
         if 'attributes' in all_info.keys():
             attribute_df = pd.DataFrame(all_info['attributes'])
             self._attribute_indx_to_name = attribute_df.set_index('id')['name'].to_dict()
+        else:
+            categories_df = None
 
         return {'categories_df': categories_df, 'annotations_df': annotations_df, 
                 'images_df': images_df, 'meta_info': meta_info}

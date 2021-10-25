@@ -4,12 +4,13 @@ import numpy as np
 
 """
 This contains keras layers used to encode image features and create tensors
-to be fed into the prediction head. It uses transformers similar to those in the 
-"Attention is All You Need" and DETR models.
+to be fed into the prediction head. It uses transformers from DETR models diagram,
+with minor modification preventing nan values.
 
 Main Layers:
 ImageEncoderAttention()
 DecoderAttention()
+PanopticAttention() # not fully tested
 """
 
 class AttentionBlock(tf.keras.layers.Layer):
@@ -27,35 +28,34 @@ class AttentionBlock(tf.keras.layers.Layer):
         self.query_shape = input_shape[0]    # used in self.show_summary()
         self.key_shape = input_shape[1]
         self.value_shape = input_shape[2]
-        
-        query_dim = self.query_shape[-1]
-        key_dim = tf.math.maximum(1, query_dim//self.num_attention_heads)
 
-        # Joint Attention Layers
-        self.JointAttentionLayer = tf.keras.layers.MultiHeadAttention(
-                                        num_heads=self.num_attention_heads, 
+        query_dim = self.query_shape[-1]
+        key_dim = tf.math.maximum(1, query_dim // self.num_attention_heads)
+
+        self.AttentionLayer = tf.keras.layers.MultiHeadAttention(
+                                        num_heads=self.num_attention_heads,
                                         key_dim=key_dim,
                                         dropout=0.1,
-                                        name='JointAttention')
-        self.JointAdd = tf.keras.layers.Add(name='JointAdd')
-        self.JointLayerNorm = tf.keras.layers.LayerNormalization(name='JointLayerNorm')
-        self.Add = tf.keras.layers.Add(name='Add')
+                                        name='AttentionLayer')
 
-    def call(self, inputs, training=False, attention_mask=None):  
+        self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
+        self.LayerNorm = tf.keras.layers.LayerNormalization(epsilon=1e-3, name='LayerNorm')
+
+    def call(self, inputs, training=False, attention_mask=None):
+
         query, key, value = inputs
-       
-        # Joint Attention Block 
-        attention_features = self.JointAttentionLayer(query=query, 
-                                                      value=value,
-                                                      key=key,
-                                                      attention_mask=attention_mask,
-                                                      training=training)      
-        
-        query = self.JointAdd([query, attention_features], training=training)
-        query = self.JointLayerNorm(query, training=training)
 
-        return query    
-    
+        attention_features = self.AttentionLayer(query=query,
+                                                 value=value,
+                                                 key=key,
+                                                 attention_mask=attention_mask,
+                                                 training=training)
+
+        query = self.Add([query, attention_features])
+        query = self.LayerNorm(query, training=training)
+
+        return query
+
     def show_summary(self):
         query = tf.keras.layers.Input(self.query_shape[1:], name='query')
         key = tf.keras.layers.Input(self.key_shape[1:], name='key')
@@ -79,20 +79,17 @@ class FeedForwardBlock(tf.keras.layers.Layer):
         # feed forward
         self.DenseRelu = tf.keras.layers.Dense(features_dim, activation='relu', name='DenseRelu')
         self.DenseLinear = tf.keras.layers.Dense(features_dim, activation=None, name='DenseLinear')
-        self.DenseAdd = tf.keras.layers.Add(name='DenseAdd')
-        self.DenseLayerNorm = tf.keras.layers.LayerNormalization(name='DenseLayerNorm')
-        self.Dropout = tf.keras.layers.Dropout(rate=.01, name='Dropout')
-              
+        self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
+        self.LayerNorm = tf.keras.layers.LayerNormalization(name='LayerNorm')
+
     def call(self, inputs, training=False):
-        features = inputs[0]       
+        features = inputs[0]
 
         # Feed Forward block
-        dense_features = self.DenseRelu(features, training=training)
-        dense_features = self.DenseLinear(dense_features, training=training)
-
-        dense_features = self.Dropout(dense_features, training=training)
-        features = self.DenseAdd([features, dense_features], training=training)
-        features = self.DenseLayerNorm(features, training=training)
+        dense_features = self.DenseRelu(features)
+        dense_features = self.DenseLinear(dense_features)
+        features = self.Add([features, dense_features])
+        features = self.LayerNorm(features, training=training)
 
         return features
 
@@ -108,26 +105,27 @@ class EncoderBlock(tf.keras.layers.Layer):
         self.num_attention_heads = num_attention_heads
 
         # layers
-        self.SelfAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads, 
+        self.SelfAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads,
                                                  name='SelfAttentionBlock')
         self.FeedForwardBlock = FeedForwardBlock(name='FeedForwardBlock')
-        self.Add = tf.keras.layers.Add(name='Add')
+        self.Add1 = tf.keras.layers.Add(dtype=tf.float32, name='Add1')
+        self.Add2 = tf.keras.layers.Add(dtype=tf.float32, name='Add2')
 
     def get_config(self):
         config = super().get_config()
         config.update({'num_attention_heads': self.num_attention_heads})
         return config
-    
+
     def build(self, input_shape):
         self.encoder_features_shape = input_shape[0]
         self.encoder_positional_shape = input_shape[1]
-              
+
     def call(self, inputs, training=False):
         encoder_features, encoder_positional = inputs
 
         # Self Attention
-        query = self.Add([encoder_features, encoder_positional]) 
-        key = self.Add([encoder_features, encoder_positional]) 
+        query = self.Add1([encoder_features, encoder_positional])
+        key = self.Add2([encoder_features, encoder_positional])
         value = encoder_features
 
         encoder_features = self.SelfAttentionBlock([query, key, value], training=training)
@@ -187,8 +185,8 @@ class ImageEncoderAttention(tf.keras.layers.Layer):
                                    for dim in range(encoder_dim)]
                                    for k in range(num_encoder_col*num_encoder_row)])
         init_value = tf.reshape(init_value, [num_encoder_row, num_encoder_col, encoder_dim])
-        self.positional_encoding = tf.Variable(init_value, trainable=False, name='positional_encoding')
-        
+        self.positional_encoding = tf.Variable(init_value, trainable=True, name='positional_encoding')
+
     def call(self, inputs, training=False):
         encoder_features = inputs[0]  # [batch, rows, columns, features_dim]
         batch_size = self.GetBatchDim(encoder_features)
@@ -203,7 +201,7 @@ class ImageEncoderAttention(tf.keras.layers.Layer):
 
         # apply transformer blocks
         for i in range(self.num_blocks):
-            encoder_features = self.EncoderBlocks[i]([encoder_features, positional_encoding], 
+            encoder_features = self.EncoderBlocks[i]([encoder_features, positional_encoding],
                                                       training=training)
 
         # return encoder and positional to original shapes
@@ -226,24 +224,23 @@ class DecoderBlock_NoSelfAttention(tf.keras.layers.Layer):
         self.num_attention_heads = num_attention_heads
 
         # layers
-        self.JointAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads, 
+        self.JointAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads,
                                                   name='JointAttentionBlock')
         self.FeedForwardBlock = FeedForwardBlock(name='FeedForwardBlock')
-        self.Add = tf.keras.layers.Add(name='Add')
 
     def get_config(self):
         config = super().get_config()
         config.update({'num_attention_heads': self.num_attention_heads})
         return config
-              
+
     def call(self, inputs, training=False):
-        encoder_features, decoder_features, encoder_positional, decoder_positional = inputs
+        encoder_value, decoder_features, encoder_key, decoder_positional = inputs
 
         # Joint Attention
-        query = self.Add([decoder_features, decoder_positional]) 
-        key = self.Add([encoder_features, encoder_positional]) 
-        value = encoder_features
-        
+        query = decoder_features
+        key = encoder_key
+        value = encoder_value
+
         decoder_features = self.JointAttentionBlock([query, key, value], training=training)
 
         # Feed Forward
@@ -259,36 +256,32 @@ class DecoderBlock(tf.keras.layers.Layer):
         self.num_attention_heads = num_attention_heads
 
         # layers
-        self.SelfAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads, 
+        self.SelfAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads,
                                                  name='SelfAttentionBlock')
-        self.JointAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads, 
+        self.JointAttentionBlock = AttentionBlock(num_attention_heads=num_attention_heads,
                                                   name='JointAttentionBlock')
         self.FeedForwardBlock = FeedForwardBlock(name='FeedForwardBlock')
-        self.Add = tf.keras.layers.Add(name='Add')
 
     def get_config(self):
         config = super().get_config()
         config.update({'num_attention_heads': self.num_attention_heads})
         return config
-              
+
     def call(self, inputs, training=False):
-        encoder_features, decoder_features, encoder_positional, decoder_positional = inputs
+        encoder_value, decoder_features, encoder_key, decoder_positional = inputs
 
         # Self Attention
-        query = self.Add([decoder_features, decoder_positional]) 
-        key = self.Add([decoder_features, decoder_positional]) 
+        query = decoder_features  # decoder_features + decoder_positional is commented out. This is what seems to be used in the paper's diagram, but is causing nans. Instead the standard AIAYN version is used
+        key = decoder_features  # decoder_features + decoder_positional
         value = decoder_features
 
         decoder_features = self.SelfAttentionBlock([query, key, value], training=training)
-        
+
         # Joint Attention
         query = decoder_features
-        key = encoder_features
-        value = encoder_features
-        
-        # add positionals and perform joint attention
-        query = self.Add([query, decoder_positional]) 
-        key = self.Add([key, encoder_positional]) 
+        key =  encoder_key
+        value = encoder_value
+
         decoder_features = self.JointAttentionBlock([query, key, value], training=training)
 
         # Feed Forward
@@ -297,19 +290,17 @@ class DecoderBlock(tf.keras.layers.Layer):
         return decoder_features
 
 
-
-
 class DecoderPrep(tf.keras.layers.Layer):
     def __init__(self, num_object_preds, decoder_dim, name='DecoderPrep', **kwargs):
         super().__init__(name=name, **kwargs)
         self.num_object_preds = num_object_preds
         self.decoder_dim = decoder_dim
-                    
+
     def get_config(self):
         config = super().get_config()
         config.update({'num_object_preds': self.num_object_preds,
                        'decoder_dim': self.decoder_dim})
-        return config 
+        return config
 
     def build(self, input_shape):
         self.encoder_features_shape = input_shape[0]  # used in self.show_summary()
@@ -324,6 +315,9 @@ class DecoderPrep(tf.keras.layers.Layer):
         self.Flatten2D_Image = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
         self.Flatten2D_Positional = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
 
+        # encoder key adjustment
+        self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
+
         # initial decoder input (treated as positional encoding)
         initializer = tf.random_normal_initializer()
         init_decoder_features = initializer([self.num_object_preds, self.decoder_dim], tf.float32)
@@ -333,18 +327,21 @@ class DecoderPrep(tf.keras.layers.Layer):
         encoder_features, encoder_positional = inputs
 
         # update encoder shape
-        encoder_features = self.Flatten2D_Image(encoder_features)
-        encoder_positional = self.Flatten2D_Positional(encoder_positional)
+        encoder_value = self.Flatten2D_Image(encoder_features)
+        encoder_key = self.Flatten2D_Positional(encoder_positional)
+
+        # update encoder's key
+        encoder_key = self.Add([encoder_value, encoder_key])  # note of interest: this is a difference between DETR model diagram and standard AIAYN
 
         # update decoder shape
-        batch_size = self.GetBatchDim(encoder_features)
+        batch_size = self.GetBatchDim(encoder_value)
         init_decoder_features = tf.expand_dims(self.init_decoder_features, axis=0)  # batch dim
 
         decoder_features = self.TileBatch2D([init_decoder_features, batch_size])  # [batch, num_preds, decoder_dim1]
         decoder_positional = decoder_features
 
-        return encoder_features, decoder_features, encoder_positional, decoder_positional
-        
+        return encoder_value, decoder_features, encoder_key, decoder_positional
+
     def show_summary(self):
         encoder_features = tf.keras.layers.Input(shape=self.encoder_features_shape[1:], name='encoder_features')
         positional_encoding = tf.keras.layers.Input(shape=self.encoder_positional_encoding_shape[1:], name='positional_encoding')
@@ -402,15 +399,15 @@ class PanopticAttention(tf.keras.layers.Layer):
         self.Flatten2D_Image = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
         self.Flatten2D_Positional = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
         self.ReshapeOutput = tf.keras.layers.Reshape([num_rows, num_cols, num_obj, -1], name='ReshapeOutput')
-        
+
         # other layers
         self.Add = tf.keras.layers.Add(name='Add')
         self.LayerNorm = tf.keras.layers.LayerNormalization(name='LayerNorm')
         self.Divide = tf.keras.layers.Lambda(lambda x: x[0] / x[1], name='Divide')
-          
-    def call(self, inputs, training=False, self_attention_mask=None):  
+
+    def call(self, inputs, training=False, self_attention_mask=None):
         image_encoding, decoder_encoding, positional_encoding = inputs
-        
+
         # prepare shapes
         image_encoding = self.Flatten2D_Image(image_encoding)
         positional_encoding = self.Flatten2D_Positional(positional_encoding)
@@ -437,7 +434,7 @@ class PanopticAttention(tf.keras.layers.Layer):
         # reshape in standard conv format
         attention_maps = self.ReshapeOutput(multi_head)  # [batch, rows, cols, num_attention_heads*num_obj]
 
-        return attention_maps    
+        return attention_maps
 
     def show_summary(self):
         image_encoding = tf.keras.layers.Input(shape=self.image_encoding_shape[1:], name='image_encoding')

@@ -10,7 +10,7 @@ and the model implementation.
 
 
 class Filepaths:
-    def __init__(self, model_name='custom_DETR', dataset_name='Fashionpedia', drive_type='google_drive'):
+    def __init__(self, model_name='custom_DETR', dataset_name='COCO', drive_type='google_drive'):
 
         self._dataset_name = dataset_name
         self._model_name = model_name
@@ -19,7 +19,7 @@ class Filepaths:
         if drive_type == 'google_drive':
             archive_base_dir = '/content/drive/MyDrive/datasets/'
             local_base_dir = '/content/datasets/'
-            checkpoint_load_dir = os.path.join(archive_base_dir, self._dataset_name, 'ModelCheckpoints/')
+            checkpoint_load_dir = os.path.join('/content/drive/MyDrive', 'ModelCheckpoints', self._dataset_name)
             checkpoint_save_dir = checkpoint_load_dir
             model_files_dir = '/content/drive/MyDrive/GitHub/DETR_for_TF/ModelComponents/'
             tfrec_files_dir = None
@@ -97,7 +97,7 @@ class StrategyOptions:
 
 # Set Model Parameters
 class ModelParameters:
-    def __init__(self, dataset_name='Fashionpedia'):
+    def __init__(self, dataset_name='COCO'):
 
         # constants
         self._num_object_preds = 96

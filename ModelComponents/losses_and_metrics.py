@@ -5,118 +5,205 @@ from scipy.optimize import linear_sum_assignment
 import tensorflow_addons as tfa
 
 
+# basic loss components
+L1_loss = tf.keras.losses.MeanAbsoluteError(reduction=tf.keras.losses.Reduction.NONE)
+GIOU_loss = lambda x, y: tfa.losses.giou_loss(x, y, mode='giou')
+GIOU_Metric = lambda x, y: 1.0 - GIOU_loss(x, y)
+IOU_loss = lambda x, y: tfa.losses.giou_loss(x, y, mode='iou')
+IOU_Metric = lambda x, y: 1.0 - IOU_loss(x, y)
+SigmoidFocalCrossEntropy = tfa.losses.SigmoidFocalCrossEntropy(reduction=tf.keras.losses.Reduction.NONE)
+BinaryCrossentropy = tf.keras.losses.BinaryCrossentropy(
+        label_smoothing=.1, reduction=tf.keras.losses.Reduction.NONE)
+CategoricalCrossentropy = tf.keras.losses.BinaryCrossentropy(
+        label_smoothing=.1, reduction=tf.keras.losses.Reduction.NONE)
+
+
+def safe_clip(probability):
+    """ scale/shift a probability away from 0 and 1.
+    Used for bounding logarithm outputs. """
+    epsilon = .0001
+    factor = 1.0 - 2.0 * epsilon
+    return factor * probability + epsilon
+
+def apply_mask(mask, tensor):
+    # ensures matching dtypes while preserving tensor dtype
+    return tf.cast(mask, tensor.dtype) * tensor
+
+def ExistLoss(y_true, y_pred):
+    # assigns error based on prediction of 'None' class
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
+    return BinaryCrossentropy(y_true, y_pred)
+
+def CategoryMatchLoss(y_true, y_pred):
+    # crossentropy without the logarithm. y_true acts as a mask
+    # used in bipartite matching cost
+    return tf.reduce_sum((1.0 - y_pred) * y_true, axis=-1)
+
+def CategoryLoss(y_true, y_pred):
+    # this is a binary loss on just the true category. (y_true acts as a mask)
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
+    return BinaryCrossentropy(y_true, safe_clip(y_pred * y_true))
+
+def AttributeLoss(y_true, y_pred):
+    if tf.math.not_equal(tf.shape(y_true)[-1], 1):
+        y_true = tf.expand_dims(y_true, axis=-1)
+
+    if tf.math.not_equal(tf.shape(y_pred)[-1], 1):
+        y_pred = tf.expand_dims(y_pred, axis=-1)
+    return SigmoidFocalCrossEntropy(y_true, y_pred)
+
+def BoxLoss(y_true, y_pred, giou_weight=2.0, l1_weight=5.0):
+    return giou_weight * GIOU_loss(y_true, y_pred) + l1_weight * L1_loss(y_true, y_pred)
+
 
 class MatchingLoss(tf.keras.layers.Layer):
     def __init__(self, name='MatchingLoss', **kwargs):
-        super().__init__(name=name, dtype='float32', **kwargs)
+        super().__init__(name=name, dtype=tf.float32, **kwargs)
+
+        # layers
+        self.MatchingMask = MatchingMask()
+        self.CostArray = CostArray()
+        self.apply_mask = apply_mask
+        self.safe_clip = safe_clip
+
+        # losses
+        self.CategoryLoss = CategoryLoss
+        self.ExistLoss = ExistLoss
+        self.AttributeLoss = AttributeLoss
+        self.BoxLoss = BoxLoss
+
+        # metrics
+        self.MatchingMetric = MatchingMetric()
+
+    def call(self, inputs):
+
+        y_true, y_pred = inputs
+
+        category, attribute, bbox, num_objects = y_true
+        cat_preds, attribute_preds, box_preds = y_pred
+
+        # restrict values for nan-prevention
+        cat_preds = self.safe_clip(cat_preds)
+        attribute_preds = self.safe_clip(attribute_preds)
+
+        # get matching assignment mask
+        assignment_mask, assigned_predictions = self.MatchingMask(
+                        [(category, bbox, num_objects), (cat_preds, box_preds)])
+
+        # get masked, pairwise costs
+        # ## category
+        category_cost = self.CostArray(category, cat_preds, self.CategoryLoss)
+        category_cost = self.apply_mask(assignment_mask, category_cost)
+
+        # ## attribute
+        attribute_cost = self.CostArray(attribute, attribute_preds, self.AttributeLoss)
+        attribute_cost = tf.reduce_mean(attribute_cost, axis=[3])
+        attribute_cost = self.apply_mask(assignment_mask, attribute_cost)
+
+        # ## box
+        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)
+        box_cost = self.apply_mask(assignment_mask, box_cost)
+
+        # ## object existence
+        exist_cost = self.ExistLoss(assigned_predictions, cat_preds[ ..., 0:1])
+
+        # get mean total
+        # mean over actual objects (masked costs only 'num_objects' nonzero entries )
+        total_num_objects = tf.cast(tf.reduce_sum(num_objects), tf.float32) +.01
+
+        category_cost = tf.reduce_sum(category_cost, axis=[-2, -1]) / total_num_objects
+        attribute_cost = tf.reduce_sum(attribute_cost, axis=[-2, -1]) / total_num_objects
+        box_cost = tf.reduce_sum(box_cost, axis=[-2, -1]) / total_num_objects
+
+        # mean over all predictions
+        exist_cost = tf.reduce_mean(exist_cost, axis=-1)
+
+        total_loss = category_cost + attribute_cost + box_cost + exist_cost
+        losses = [total_loss, category_cost, attribute_cost, box_cost, exist_cost]
+
+        # compute metrics
+        masked_iou = self.MatchingMetric([y_true, y_pred], assignment_mask)
+        masked_iou = tf.reduce_sum(masked_iou, axis=[1,2]) / total_num_objects
+
+        metrics = [masked_iou]
+        return losses, metrics
+
+
+class MatchingMetric(tf.keras.layers.Layer):
+    def __init__(self, name='MatchingMetric', **kwargs):
+        super().__init__(name=name, dtype=tf.float32, **kwargs)
+
+        # layers
+        self.MatchingMask = MatchingMask()
+        self.CostArray = CostArray()
+        self.apply_mask = apply_mask
+
+        # metrics
+        self.IOU_Metric = IOU_Metric
+
+    def call(self, inputs, assignment_mask=None):
+        y_true, y_pred = inputs
+
+        category, attribute, bbox, num_objects = y_true
+        cat_preds, attribute_preds, box_preds = y_pred
+
+        # get matching assignment mask
+        if assignment_mask is None:
+            assignment_mask, assigned_predictions = self.MatchingMask(
+                            [(category, bbox, num_objects), (cat_preds, box_preds)])
+
+        # get masked, pairwise metric
+        masked_iou = self.CostArray(bbox, box_preds, self.IOU_Metric)
+        masked_iou = self.apply_mask(assignment_mask, masked_iou)
+
+        metrics = [masked_iou]
+        return metrics
+
+
+class MatchingMask(tf.keras.layers.Layer):
+    def __init__(self, name='MatchingMask', **kwargs):
+        super().__init__(name=name, dtype=tf.float32, **kwargs)
 
         # layers
         self.MatchingAssignment = MatchingAssignment()
         self.CostArray = CostArray()
-        categorical_crossentropy = tf.keras.losses.CategoricalCrossentropy(
-                                    reduction=tf.keras.losses.Reduction.NONE)
 
-        # categories  
-        self.CategoryLoss = categorical_crossentropy
+        # losses
+        self.BoxLoss = BoxLoss
+        self.CategoryMatchLoss = CategoryMatchLoss
 
-        def cat_match_loss_fn(y_true, y_pred):
-            # crossentropy without the logarithm. y_true acts as a mask
-            return tf.reduce_sum((1.0 - y_pred) * y_true, axis=-1)
-        
-        self.CategoryMatchLoss = cat_match_loss_fn
-
-        def cat_loss_fn(y_true, y_pred):
-            return -1.0 * tf.reduce_sum(tf.math.log(y_pred + .00001) * y_true, axis=-1)
-        
-        self.CategoryLoss = cat_loss_fn
-
-        def exist_loss_fn(y_matched, y_pred):
-            # assigns error based on prediction of 'None' class
-            y_pred_match = 1.0 - y_pred[..., 0:1]
-            return categorical_crossentropy(y_matched, y_pred_match)
-
-        self.ExistLoss = exist_loss_fn
-
-        # attributes 
-        self.AttributeLoss = tfa.losses.SigmoidFocalCrossEntropy(
-                                        reduction=tf.keras.losses.Reduction.NONE)
-        # boxes
-        giou_fn = tfa.losses.GIoULoss(reduction=tf.keras.losses.Reduction.NONE)
-        L1_fn = tf.keras.losses.MeanAbsoluteError(reduction=tf.keras.losses.Reduction.NONE)
-        def box_loss(y_true, y_pred):
-            return 2.0 * giou_fn(y_true, y_pred) + 5.0 * L1_fn(y_true, y_pred)
-        
-        self.BoxLoss = box_loss
-
-        # metrics
-        self.IOU_Metric = tfa.losses.GIoULoss(mode='iou', reduction=tf.keras.losses.Reduction.NONE)
-
-    
-    def call(self, inputs):  
+    def call(self, inputs):
         y_true, y_pred = inputs
-        category, attribute, bbox, num_objects = y_true
-        cat_preds, attribute_preds, box_preds = y_pred
-
-        # collect info
-        batch_size = tf.cast(tf.shape(cat_preds)[0], tf.float32)
-        total_num_preds = batch_size * tf.cast(tf.shape(cat_preds)[1], tf.float32)
-        total_num_obj = tf.cast(tf.reduce_sum(num_objects), tf.float32)
+        category, bbox, num_objects = y_true
+        cat_preds, box_preds = y_pred
 
         # get pairwise costs
         category_cost_match = self.CostArray(category, cat_preds, self.CategoryMatchLoss)
-        category_cost = self.CostArray(category, cat_preds, self.CategoryLoss)
-        attribute_cost = self.CostArray(attribute, attribute_preds, self.AttributeLoss)
-        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)       
-
-        # get pairwise metrics
-        iou_metric = self.CostArray(bbox, box_preds, self.IOU_Metric)  
+        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)
 
         # get matching assignment mask
-        assignment_mask = self.MatchingAssignment(category_cost_match + box_cost, 
+        assignment_mask = self.MatchingAssignment(category_cost_match + box_cost,
                                                   num_objects)
+
         # find objects that were not assigned
         assigned_predictions = tf.reduce_max(assignment_mask, axis=-2)
         assigned_predictions = tf.expand_dims(assigned_predictions, axis=-1)
 
-        # get mean masked costs
-        category_cost = tf.reduce_sum(assignment_mask * category_cost) / total_num_obj
-        attribute_cost = tf.reduce_sum(assignment_mask * attribute_cost) / total_num_obj
-        box_cost = tf.reduce_sum(assignment_mask * box_cost) / total_num_obj
-        exist_loss = tf.reduce_sum(self.ExistLoss(assigned_predictions, cat_preds[ ..., 0:1])) / total_num_preds
-
-        total_loss = category_cost + attribute_cost + box_cost + exist_loss
-        losses = [total_loss, category_cost, attribute_cost, box_cost, exist_loss]
-        
-        # get masked metrics
-        masked_iou = assignment_mask * iou_metric
-
-        iou_metric = tf.reduce_sum(masked_iou)  / total_num_obj
-        num_correct_at_50 = tf.math.count_nonzero(tf.math.greater_equal(masked_iou, .50))  
-        mAP_50_95 = 0.0
-        r_vals = list(range(50, 100, 5))
-        for r in r_vals:
-            r = r / 100.0
-            mAP_50_95 += tf.cast(tf.math.count_nonzero(tf.math.greater_equal(masked_iou, r)), 
-                                 tf.float32)
-
-        num_predicted = tf.math.count_nonzero(tf.math.less(cat_preds[:, 1, ...], .50))  
-        
-        mAP50 = tf.cast(num_correct_at_50, tf.float32) / tf.cast(num_predicted, tf.float32)
-        mAP_50_95 = mAP_50_95 / tf.cast(num_predicted*len(r_vals), tf.float32)
-        
-        metrics = [iou_metric, mAP50, mAP_50_95] 
-        return losses, metrics
+        return assignment_mask, assigned_predictions
 
 
 class CostArray(tf.keras.layers.Layer):
-    """ arranges tensors for broadcasting pairwise f(x, y) operations """
+    """ arranges tensors for broadcasting and
+    computes pairwise f(x, y) values """
 
     def __init__(self, **kwargs):
-        super().__init__(name='CostArray', dtype='float32', **kwargs)
-  
-    def call(self, y_true, y_pred, func):  
+        super().__init__(name='CostArray', dtype=tf.float32, **kwargs)
+
+    def call(self, y_true, y_pred, func):
         y_true = tf.expand_dims(y_true, axis=-2)
-        y_pred = tf.expand_dims(y_pred, axis=-3) * tf.ones_like(y_true)
+        y_pred = tf.expand_dims(y_pred, axis=-3)# * tf.ones_like(y_true)
         return func(y_true, y_pred)
 
 
@@ -124,33 +211,35 @@ class MatchingAssignment(tf.keras.layers.Layer):
     """ Bipartite Assigment. Creates mask indicating min cost matching assignments. """
 
     def __init__(self, name='MatchingAssignment', **kwargs):
-        super().__init__(name=name, dtype='float32', **kwargs)
+        super().__init__(name=name, dtype=tf.float32, **kwargs)  # override mixed precision
 
-    def scipy_linear_assignment_mask(self, cost_array, num_objects):         
+    def scipy_linear_assignment_mask(self, cost_array, num_objects):
         batch_size = cost_array.shape[0]
         num_padded_obj = cost_array.shape[1]
-        masks = np.zeros_like(cost_array)
+        masks = np.zeros_like(cost_array)  # numpy used for item assignments below
 
         # get assignments
         for i in range(batch_size):
-            num_objects_i = num_objects[i]
+            num_objects_i = num_objects[i][0]
             assignments_i = linear_sum_assignment(cost_array[i, :num_objects_i, :])
             masks[i, ...][assignments_i] = 1.0
-        
+
         return masks
 
-    def call(self, cost_array, num_objects):  
-        masks = tf.numpy_function(func=self.scipy_linear_assignment_mask, 
+    def call(self, cost_array, num_objects):
+        num_objects = tf.reshape(num_objects, [-1,1])  # needed for compat in model.fit()
+        masks = tf.numpy_function(func=self.scipy_linear_assignment_mask,
                                    inp=[cost_array, num_objects], Tout=cost_array.dtype)
         return masks
 
 
+
 '''
-####### In Progress. Attempting to make a TPU friendly alternative to 
+####### In Progress. Attempting to make a TPU friendly alternative to
 scipy bipartite matching. (No non-tf ops and compat with @tf.function, XLA)
 
 class GreedyMatchingAssignment(tf.keras.layers.Layer):
-    """ TODO: TPU compliant Bipartite Assigment alternative. 
+    """ TODO: TPU compliant Bipartite Assigment alternative.
     Creates mask indicating the (approximated) min cost matching assignments. """
 
     def __init__(self, name='GreedyMatchingAssignment', **kwargs):
@@ -162,11 +251,11 @@ class GreedyMatchingAssignment(tf.keras.layers.Layer):
         self.num_preds = input_shape[2]  # need fixed size for XLA?
 
     #@tf.function()
-    def call(self, cost_array, num_objects): 
+    def call(self, cost_array, num_objects):
         batch_size = tf.shape(cost_array)[-3]
         padded_obj = tf.shape(cost_array)[-2]
         num_preds = tf.shape(cost_array)[-1]
-        
+
         assignments = []
         columns = []
         for i in range(batch_size):
@@ -177,15 +266,15 @@ class GreedyMatchingAssignment(tf.keras.layers.Layer):
 
             assignments.append(assignments_i)
             columns.append(columns_assigned_i)
-        
+
         return  assignments, columns
 
     def selected_preds_mask(self, selected_cols, num_preds):
         a = tf.expand_dims(selected_cols, 1)
-        b = tf.expand_dims(tf.range(num_preds), 0)  
+        b = tf.expand_dims(tf.range(num_preds), 0)
         return tf.math.reduce_any(tf.math.equal(a, tf.cast(b, a.dtype)), axis=0)
 
-    def single_element_call(self, cost_array2D, num_objects):  
+    def single_element_call(self, cost_array2D, num_objects):
         """
         Matching corresponding to batch size 1
         """
@@ -221,7 +310,7 @@ class GreedyMatchingAssignment(tf.keras.layers.Layer):
 
             # update matches
             matches = matches.write(j, tf.cast([object_num, choices[indx]], matches.dtype))
-        
+
         # get final assignments
         assignments = matches.stack()
         columns_assigned = self.selected_preds_mask(selected_cols, num_preds)
