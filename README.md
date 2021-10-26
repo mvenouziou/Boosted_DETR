@@ -1,6 +1,6 @@
 # DETR for Tensorflow
 
-in This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. Although I did not make use of their repository, the [official PyTorch implementation](https://github.com/facebookresearch/detr/tree/master) deserves citation.
+This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. Although I did not make use of their repository, the [official PyTorch implementation](https://github.com/facebookresearch/detr/tree/master) deserves citation.
 
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
@@ -55,7 +55,7 @@ The description below outlines unique features, novel model architectures ideas,
 
 *Extension of the adaptive encoder/decoder architecture proposed above. Standard DETR was found to perform below state-of-the-art when dealing with small objects. The leading small-object detectors all have shared prediction heads that access features from multiple (convolutional) encoder scales, and produce a much larger number of predictions. The adaptive encoder/decoder DETR proposal is analogous to using CNN courseness levels to detect objects with a wide variety of sizes and increases the number of predictions made.*
 
--   Option 1: Instead of early-stopping, carry forward the highst confidence predictions from each decoder block, then perform an additional bipartite matching training step
+-   Option 1: Instead of early-stopping, carry forward the highest confidence predictions from each decoder block, then perform an additional bipartite matching training step
 -   Option 2 (Boosted ensemble): Retain high confidence predictions, and carry the corresponding decoder features forward at each step via attention masking. Decoder features corresponding to low confidence predictions get updated during the next decoder block.
 
 ----
