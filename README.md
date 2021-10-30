@@ -1,38 +1,71 @@
 # DETR for Tensorflow
 
-This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko.
+This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. Although I did not make use of their repository, the [official PyTorch implementation](https://github.com/facebookresearch/detr/tree/master) deserves citation.
 
-My version includes a pre-trainer model, a multi-instance classifier sharing the detection model's weights, except with different prediction heads.
-
-#### Notes:
-
-- The models are written completely within the Tensorflow 2 / Keras subclass API and should be easy for anyone familiar with that API to train, modify and customize to their task in a single or multi-GPU environment.
-
-- It requires only common dependencies used for Tensorflow projects, plus a single SciPy function, *linear_sum_assignment*, for bipartite matching. (This SciPy function, unfortunately, prevents the model from TPU training. The official DETR model faces the same issue.)
-
-- The loss function, metrics, training regime and text tokenization / de-tokenization are all built in. Train by passing an optimizer into model.compile() and then using model.fit() as usual.
-
-- I modified the standard DETR architecture to accept both classes (exactly one per object) and subclasses (0 or more per object), allowing the option for fine-grained object descriptions. Panoptic segmentation has not yet been implemented.
-
-
-####  Training
-
-- The official DETR model was intensively trained on 8-16 high-end GPU's for 3 full day. Neither my computer's integrated graphics nor Google Colab's single GPU are exactly up the task, especially at full model size. Flush with $300 in free credits from Google Cloud, I fully prepared the model for training on their platform only to discover GPU's are specifically excluded from the offer. I am currently searching for an alternative cloud system to train the model at a reasonable price.
-
-#### Notes:
-- This implementation is in stark contrast to the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection), which does not use the standard TF / Keras model building/training workflow. Perhaps a deeper dive into their code base will bring clarity regarding their choice, which adds significant complexity to implementing their models, especially when customizing to new use cases.
-
-- Although I did **not** make use of their repository, it is worth citing the [official Github Repo](https://github.com/facebookresearch/detr/tree/master) PyTorch implementation, publicly available under Apache License. I did look through their repo to see if they used an alternative to *scipy.optimize.linear_sum_assignment* for performing bipartite matching (they did not), and to benchmark my results.
-
-- Model speed appears comparable to that of the official DETR PyTorch implementation.
+The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
 ----
 
-## An Idea
+## Model Features:
 
-The bipartite matching algorithm (*linear_sum_assignment*) speed seems to be the main limiting factor to naively applying DETR's training regime to traditional object detectors. Assignments involving tens of thousands of proposals may add several seconds / batch during training.
+**Fully Integrated with Tensorflow 2 / Keras API**
+  -   Alternate approach than the Tensorflow Object Detection API, which lives outside Tensorflow's normal build/train API.
+  -   Straightforward modification, inference and training  for anyone versed in Tensorflow.  
+  -   Train model in single and distributed GPU environments by simply passing an optimizer into *model.compile()* and then calling *model.fit()*.  Custom loss functions, metrics, and training regime have all been built in.
 
-It would be interesting to experiment with a modified CNN training routine where it is fully trained as normal, then fine-tuning with a version of bipartite matching training to remove the model's dependence on NMS.
+**Predict Fine-Grained Object Descriptions**
+  -   Allows richer descriptions than traditional single-class object detection. (The data pipeline produces masked dummy features when corresponding training data is not provided.)
+
+**Classifier Sub-Model for Pretraining**
+  -   (Note: training benefits of this sub-model provides not yet evaluated/optimized.)  
+
+**Built-in Text Tokenization / De-Tokenization**
+  -   All model inputs and ouputs are human-readable, with no discernable cost to training or inference speed. 
+  -   Note that while text data isn't compatible with Tensroflow TPU training at this time, TPU incompatibility is already a consequence of a fundamental feature of the DETR architecture. (See notes section below.)
+
+**Custom Data Pipeline**
+  -   Automatically load COCO-format object detection data as TF Datasets with optional image augmentations. 
+  -   All class / subclass information is presented to the user as text. (Standard COCO datasets are typically pre-tokenized, requiring de-tokenization in order to interpret values.)
+
+----
+## Novel Architectures:
+*The DETR paper authors used the equivalent of 1,152 GPU-hours of compute time (3 days on 16 GPU!), which prevents me from training the base model, let alone experiment with novel ideas. However, here are possible architecture experiments for people with access to better resources:*
+
+**Adaptive Decoder Inference Size**
+
+*Standard DETR trains a shared prediction head to produce outputs after each decoder block. During inference, however, intermediate predictions are not produced. (One reason for this training regime is so that a single large model can be trained and then cut down to desired size based on application.)*
+
+*Alternative: Predict confidence estimates after each deder block. If a threshhold is reached, output predictions from that block and skip subsequent decoder blocks.*
+
+  -   Pro: "Easy" images use fewer computations. "Difficult" images still have access to the full model.
+  -   Pro: Allows larger decoder network with the same average image inference cost. 
+  -   Con: Added inference & training costs to create reliable confidence level predictions after every decoder block.
+  -   Unkown: Net effect on inference quality.
+ 
+**Adaptive Encoder + Decoder Size**
+
+*Use an adaptive encoder as well as adaptive decoder size.*
+
+  -   Pro: Adds variety to the number of encoder features seen by the decoder. 
+  -   Pro: encoder blocks deferred until needed. Imporved inference speed at any given decoder block, since fewer encoder blocks used.
+  -   Con: Alters model architecture in a way likely to increase training time on what is already a computationally intensive training regime.
+  -   Unkown: Effect on prediction quality and early stopping decisions
+  
+**Boosted Ensemble**
+
+*Extension of the adaptive encoder/decoder architecture proposed above. Standard DETR was found to perform below state-of-the-art when dealing with small objects. The leading small-object detectors all have shared prediction heads that access features from multiple (convolutional) encoder scales, and produce a much larger number of predictions. The adaptive encoder/decoder DETR proposal is analogous to using CNN courseness levels to detect objects with a wide variety of sizes and increases the number of predictions made.*
+
+-   Option 1: Instead of early-stopping, carry forward the highest confidence predictions from each decoder block, then perform an additional bipartite matching training step
+-   Option 2 (Boosted ensemble): Retain high confidence predictions, and carry the corresponding decoder features forward at each step via attention masking. Decoder features corresponding to low confidence predictions get updated during the next decoder block.
+
+----
+## Notes:
+
+- My implementation is in contrast to the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection), which is not compatible with the standard Tensorflow model building/training API. Their approach add significant complexity to making more than small modifications to their prebuilt models. Perhaps their choice allows better portability to TF Lite and JS formats.
+
+- Model training (but not inference) uses a SciPy function, *linear_sum_assignment*, for bipartite matching. Unfortunately this function is not compatible with Tensorflow TPU training and I have not yet found a workable alternative. (The official DETR model also relies on this function.)
+
+- Panoptic segmentation not yet implemented.
 
 ----
 
@@ -42,27 +75,27 @@ After Google and others showed great success in Natural Language Processing with
 
 #### Transformers in NLP
 
-RNN's with Attention had become the defacto standard for NLP tasks. These, however, are hindered by lack of training parallelism and slowdowns on large dimensions and very long sequences. *Attention is All You Need* replaced RNN's entirely with a modified attention architecture ("Transformers") utilizing joint encoder-decoder attention and decoder self-attention. Their implementation has all the benefits of attention (allowing the decoder to selectively use the full set of encoder vectors) but can be trained in parallel and uses linear projections onto low-dimensional subspaces to provide more nuanced encoder-decoder interations at reduced computational costs.
+RNN's with Attention had become the defacto standard for NLP tasks. These, however, are hindered by lack of training parallelism, slowdowns on large dimensions, and reduced quality on long sequences. *Attention is All You Need* replaced RNN's entirely with a modified attention architecture ("Transformers") utilizing joint encoder-decoder attention and decoder self-attention. Their implementation enhances the benefits of attention (allowing the decoder to access to the full set of encoder vectors and known decoder vectors) but gains efficiencies in parallelized training, and linear projections onto low-dimensional subspaces,
 
 #### Transformers in Image Captioning
 
 State of the Art Image processing using Convolutional Neural Networks do not suffer from NLP's previous lack of parallelism, removing one of the main benefits of switching to transformers. In addition, transformers have an enormous memory footprint compared to CNNs, and they lack CNNs natural sense of spacial positioning.
 
-The most likely benefit of transformers would be for tasks involving both image processing and NLP, such as imaging captioning. [*Show, Attend and Tell: Neural Image Caption Generation with Visual Attention*](https://proceedings.mlr.press/v37/xuc15.pdf) (2015) had already used a hybrid approach connecting a CNN encoder with an RNN decoder. Replacing the RNN with Transformers as a natural extension.
+The most likely benefit of transformers would be for tasks involving both image processing and NLP, such as imaging captioning. [*Show, Attend and Tell: Neural Image Caption Generation with Visual Attention*](https://proceedings.mlr.press/v37/xuc15.pdf) (2015) had already used a hybrid approach connecting a CNN encoder with an RNN decoder. Replacing the RNN with Transformers was a natural extension.
 
-*(See my project [Attention is What You Get](https://github.com/mvenouziou/Project-Attention-Is-What-You-Get) where I use this CNN Encoder --> Transformer Encoder --> Transformer Decoder frameeork in Bristol-Myers Squibb's Molecular Translation Kaggle competition.)*
+*(See my project [Attention is What You Get](https://github.com/mvenouziou/Project-Attention-Is-What-You-Get) where I use the CNN Encoder --> Transformer Encoder --> Transformer Decoder frameeork in Bristol-Myers Squibb's Molecular Translation Kaggle competition.)*
 
 #### Transformers in Object Detection
 
-Attempting to use tranformers in object detectoin is a *significantly* more difficult task that in captioning or classification. The main problem is that state of the art detectors achieve success only by generating huge numbers of proposed object detections (often in the tens of thousands), and then weeding them down to single or double digit number of predictions with techniques such as Non-Max Suppression. Transformers simply take up too much memory to handle such a large numbers of object proposals.
+Attempting to use tranformers in object detectoin is a *significantly* more difficult task than in captioning or classification. The main problem is that state of the art detectors achieve success only by generating huge numbers of proposed object detections (often in the thousands or tens of thousands), and then weeding them down to single or double digit number of predictions with techniques such as Non-Max Suppression. Transformers simply take up too much memory to handle such a large numbers of object proposals.
 
 #### DETR's Object Detection Solution
 
-Instead of producing thousands of bad predictions and whittling them down to a few good predictions, DETR directly predicts <= 100 high quality object detections using a novel take on the CNN Encoder --> Transformer Encoder --> Transformer Decoder framework.
+Instead of producing thousands of bad predictions and whittling them down to a few good predictions, DETR directly predicts a small number of high quality object detections using a novel take on the CNN Encoder --> Transformer Encoder --> Transformer Decoder framework.
 
-The decoder trains 100 detector objects, vectors whose role is to interact with the encoder through joint-attention and produce a single object prediction. Once trained, these detectors are fixed inputs to the Transformer Decoder, constants entirely independent of the image encodings they will interact with. This design as independent constants allows them to be trained in parallel without masking.
+The decoder trains individual detector objects, vectors whose role is to interact with the encoder through joint and self-attention. Each detector is responsible for a single object prediction. Once trained, these detectors are treated as fixed inputs to the Transformer Decoder, constants entirely independent of the image encodings they will interact with. This design as independent constants allows them to be trained in parallel without masking.
 
-DETR also replaces the non-trained techniques such as non-max suppression (NMS) with a fully trainable "end-to-end" process using bipartite matching. The result is an object detector that is the new state of the art for larger objects, but lags behind the top CNN-only models with smaller objects.
+DETR also replaces the non-trained techniques such as non-max suppression (NMS) with a fully trainable "end-to-end" process using bipartite matching. The resulting object detection model became the new state of the art for larger object detection, but lags behind in small-object detection. 
 
 
 ----
