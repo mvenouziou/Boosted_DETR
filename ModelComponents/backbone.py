@@ -21,21 +21,22 @@ class EncoderBackbone(tf.keras.layers.Layer):
         height, width = self.image_input_shape[:2]
 
         # load image CNN structure
+        # DETR paper uses ResNet, bur Efficient seems a better choice.
         if model_name == 'EfficientNet':
-            base_transfer_model = tf.keras.applications.EfficientNetB2(
+            """Note: EfficientNet models expect their inputs to be float tensors 
+            of pixels with values in the [0-255] range. Preprocessing handled by model"""
+            self.ImageFeaturesExtractor = tf.keras.applications.EfficientNetB4(
                                     include_top=False,
-                                    weights='imagenet',
+                                    weights=None,  #'imagenet',
                                     input_shape=[height, width, 3])
-            self.preprocessor = tf.keras.layers.Lambda(lambda x: x)
+            self.preprocessor = tf.keras.layers.Lambda(lambda x: x)  # pass through
 
         elif model_name == 'ResNet':
-            base_transfer_model = tf.keras.applications.resnet50.ResNet50(
+            """Note: ResNet requires preprocessor. Preprocessor expects inputs 
+            to be float tensors of pixels with values in the [0-255] range."""
+            self.ImageFeaturesExtractor = tf.keras.applications.resnet50.ResNet50(
                     include_top=False, weights='imagenet', input_shape=[height, width, 3])
             self.preprocessor = tf.keras.applications.resnet50.preprocess_input
-
-        self.ImageFeaturesExtractor = tf.keras.Model(inputs=base_transfer_model.inputs,
-                            outputs=base_transfer_model.layers[-1].output,
-                            name='ImageFeaturesExtractor')
 
         self.convert_dtype = tf.keras.layers.Lambda(lambda image:
                 tf.cast(tf.image.convert_image_dtype(image, dtype=tf.uint8), tf.float32))
@@ -72,7 +73,9 @@ class BackboneNeck(tf.keras.layers.Layer):
         self.encoder_dim = encoder_dim
 
         # projection (downscaling feature dim)
-        self.conv2d_downscaler = tf.keras.layers.Conv2D(filters=self.encoder_dim, kernel_size=1, name='conv2d_downscaler')
+        self.conv2d_downscaler = tf.keras.layers.Conv2D(filters=self.encoder_dim, 
+                kernel_size=1, kernel_initializer='lecun_normal', activation='tanh', 
+                name='conv2d_downscaler')
         self.batch_norm1 = tf.keras.layers.BatchNormalization(name='batch_norm1')
         self.batch_norm2 = tf.keras.layers.BatchNormalization(name='batch_norm2')
 

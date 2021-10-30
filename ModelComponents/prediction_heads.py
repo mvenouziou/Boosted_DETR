@@ -36,11 +36,12 @@ class BoxPredictionHead(tf.keras.layers.Layer):
         self.Conv1D = tf.keras.layers.Conv1D(filters=self.num_preds, kernel_size=1)
         self.Permute = tf.keras.layers.Permute([2,1])
 
-        # SuperCatagory (objects have exactly one SuperCatagory)
-        self.Dense = tf.keras.layers.Dense(self.hidden_dim, activation='relu', name='Dense')
+        # box preds, expanded sigmoid range to make preds in [0,1] easier
+        self.Dense = tf.keras.layers.Dense(self.hidden_dim, activation='relu', 
+                                    kernel_initializer='he_normal', name='Dense')
         self.BatchNorm = tf.keras.layers.BatchNormalization(name='BatchNorm')
-        self.BoxCoords = tf.keras.layers.Dense(4, activation=None, name='BoxCoords')
-        self.Sigmoid = tf.keras.layers.Lambda (lambda x: tf.math.sigmoid(x), name='Sigmoid', dtype=tf.float32)
+        self.BoxCoords = tf.keras.layers.Dense(4, activation=None, kernel_initializer='glorot_normal', name='BoxCoords')
+        self.Sigmoid = tf.keras.layers.Lambda (lambda x: 3.0*tf.math.sigmoid(x / 100.0) - 1.0, name='Sigmoid', dtype=tf.float32)
 
     def call(self, inputs, training=False):
         features = inputs[0]  # [batch, *None, decoder dim]
@@ -100,9 +101,11 @@ class SingleClassPredictionHead(tf.keras.layers.Layer):
         self.Permute = tf.keras.layers.Permute([2,1])                                             
 
         # Catagory (objects have exactly one Catagory)
-        self.DenseCateg = tf.keras.layers.Dense(self.hidden_dim, activation='relu', name='DenseCateg')
+        self.DenseCateg = tf.keras.layers.Dense(self.hidden_dim, activation='relu', 
+                                    kernel_initializer='he_normal', name='DenseCateg')
         self.BatchNorm = tf.keras.layers.BatchNormalization(name='BatchNorm')
-        self.DenseLogits = tf.keras.layers.Dense(self.num_classes, activation=None, name='DenseLogits')
+        self.DenseLogits = tf.keras.layers.Dense(self.num_classes, kernel_initializer='glorot_normal', 
+                                                activation=None, name='DenseLogits')
         self.Softmax = tf.keras.layers.Softmax(name='Softmax', dtype=tf.float32)
 
     def call(self, inputs, training=False):
@@ -160,9 +163,11 @@ class MultiClassPredictionHead(tf.keras.layers.Layer):
         self.Permute = tf.keras.layers.Permute([2,1])
 
         # Attributes (objects one or more attributes (including padding))
-        self.Dense = tf.keras.layers.Dense(self.hidden_dim, activation='relu', name='Dense')
+        self.Dense = tf.keras.layers.Dense(self.hidden_dim, activation='relu', 
+                                    kernel_initializer='he_normal', name='Dense')
         self.BatchNorm = tf.keras.layers.BatchNormalization(name='BatchNorm')
-        self.DenseLinear = tf.keras.layers.Dense(self.num_classes, activation=None, name='DenseLinear')
+        self.DenseLinear = tf.keras.layers.Dense(self.num_classes, activation=None, 
+                            kernel_initializer='glorot_normal', name='DenseLinear')
         self.Sigmoid = tf.keras.layers.Lambda (lambda x: tf.math.sigmoid(x), name='Sigmoid', dtype=tf.float32)
 
     def call(self, inputs, training=False):

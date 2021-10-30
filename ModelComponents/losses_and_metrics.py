@@ -54,13 +54,21 @@ def AttributeLoss(y_true, y_pred):
         y_pred = tf.expand_dims(y_pred, axis=-1)
     return SigmoidFocalCrossEntropy(y_true, y_pred)
 
-def BoxLoss(y_true, y_pred, giou_weight=2.0, l1_weight=5.0):
+def BoxLoss(y_true, y_pred, giou_weight=5.0, l1_weight=1.0):
     return giou_weight * GIOU_loss(y_true, y_pred) + l1_weight * L1_loss(y_true, y_pred)
 
 
 class MatchingLoss(tf.keras.layers.Layer):
-    def __init__(self, name='MatchingLoss', **kwargs):
+    def __init__(self, name='MatchingLoss', 
+                 category_weight = 5.0, box_weight = 1.0, attribute_weight = 1.0,
+                 exist_weight = 1.0, **kwargs):
         super().__init__(name=name, dtype=tf.float32, **kwargs)
+
+        # weights
+        self.category_weight = tf.cast(category_weight, tf.float32)
+        self.box_weight = tf.cast(box_weight, tf.float32)
+        self.attribute_weight = tf.cast(attribute_weight, tf.float32)
+        self.exist_weight = tf.cast(exist_weight, tf.float32)
 
         # layers
         self.MatchingMask = MatchingMask()
@@ -88,38 +96,39 @@ class MatchingLoss(tf.keras.layers.Layer):
         cat_preds = self.safe_clip(cat_preds)
         attribute_preds = self.safe_clip(attribute_preds)
 
-        # get matching assignment mask
-        assignment_mask, assigned_predictions = self.MatchingMask(
-                        [(category, bbox, num_objects), (cat_preds, box_preds)])
-
-        # get masked, pairwise costs
-        # ## category
+        # get pairwise costs
         category_cost = self.CostArray(category, cat_preds, self.CategoryLoss)
-        category_cost = self.apply_mask(assignment_mask, category_cost)
-
-        # ## attribute
         attribute_cost = self.CostArray(attribute, attribute_preds, self.AttributeLoss)
+        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)  
+
+        # apply weights
+        category_cost = self.category_weight * category_cost
+        attribute_cost = self.attribute_weight * attribute_cost
+        box_cost = self.box_weight * box_cost
+
+        # get assignment mask    
+        assignment_mask, assigned_predictions = self.MatchingMask(
+                                    [category_cost + box_cost, num_objects])
+
+        # apply cost mask        
+        category_cost = self.apply_mask(assignment_mask, category_cost)
         attribute_cost = tf.reduce_mean(attribute_cost, axis=[3])
         attribute_cost = self.apply_mask(assignment_mask, attribute_cost)
-
-        # ## box
-        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)
         box_cost = self.apply_mask(assignment_mask, box_cost)
 
-        # ## object existence
-        exist_cost = self.ExistLoss(assigned_predictions, cat_preds[ ..., 0:1])
+        # get object existence cost
+        exist_cost = self.exist_weight * self.ExistLoss(assigned_predictions, cat_preds[ ..., 0:1])
 
         # get mean total
         # mean over actual objects (masked costs only 'num_objects' nonzero entries )
-        total_num_objects = tf.cast(tf.reduce_sum(num_objects), tf.float32) +.01
+        total_num_objects = tf.cast(tf.reduce_sum(num_objects), tf.float32) + 1.0
 
         category_cost = tf.reduce_sum(category_cost, axis=[-2, -1]) / total_num_objects
         attribute_cost = tf.reduce_sum(attribute_cost, axis=[-2, -1]) / total_num_objects
         box_cost = tf.reduce_sum(box_cost, axis=[-2, -1]) / total_num_objects
+        exist_cost = tf.reduce_mean(exist_cost, axis=-1) / total_num_objects  # extra downweighting with num objects
 
-        # mean over all predictions
-        exist_cost = tf.reduce_mean(exist_cost, axis=-1)
-
+        # total cost
         total_loss = category_cost + attribute_cost + box_cost + exist_cost
         losses = [total_loss, category_cost, attribute_cost, box_cost, exist_cost]
 
@@ -168,24 +177,12 @@ class MatchingMask(tf.keras.layers.Layer):
 
         # layers
         self.MatchingAssignment = MatchingAssignment()
-        self.CostArray = CostArray()
-
-        # losses
-        self.BoxLoss = BoxLoss
-        self.CategoryMatchLoss = CategoryMatchLoss
 
     def call(self, inputs):
-        y_true, y_pred = inputs
-        category, bbox, num_objects = y_true
-        cat_preds, box_preds = y_pred
-
-        # get pairwise costs
-        category_cost_match = self.CostArray(category, cat_preds, self.CategoryMatchLoss)
-        box_cost = self.CostArray(bbox, box_preds, self.BoxLoss)
+        matching_costs, num_objects = inputs
 
         # get matching assignment mask
-        assignment_mask = self.MatchingAssignment(category_cost_match + box_cost,
-                                                  num_objects)
+        assignment_mask = self.MatchingAssignment(matching_costs, num_objects)
 
         # find objects that were not assigned
         assigned_predictions = tf.reduce_max(assignment_mask, axis=-2)

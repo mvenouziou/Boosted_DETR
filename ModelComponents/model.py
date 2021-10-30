@@ -25,8 +25,14 @@ class DETR(tf.keras.Model):
                        num_encoder_blocks, num_encoder_heads, encoder_dim,
                        num_decoder_blocks, num_decoder_heads, decoder_dim,
                        num_panoptic_heads, panoptic_dim,
-                       vocab_dict, name='DETR', **kwargs):
+                       vocab_dict, attribute_weight=1.0, name='DETR', **kwargs):
         super().__init__(name=name)
+
+        # loss weights. These can be changed between model initializations without affecting learned params.
+        category_weight = 1.0
+        box_weight = 1.0
+        attribute_weight = attribute_weight
+        exist_weight = 1.0
 
         self.num_object_preds = num_object_preds  # ideally >> max objects in training set
         self.image_size = image_size
@@ -53,7 +59,6 @@ class DETR(tf.keras.Model):
         self.EncoderBackbone = backbone.EncoderBackbone(
                                                 image_input_shape=self.image_size,
                                                 name='EncoderBackbone')
-        #self.EncoderBackbone.trainable = False  # optional: lock backbone
 
         self.BackboneNeck = backbone.BackboneNeck(encoder_dim=self.encoder_dim,
                                                   name='BackboneNeck')
@@ -104,7 +109,12 @@ class DETR(tf.keras.Model):
         self.BboxPrep = tokenizers.BboxPrep(name='BboxPrep')
 
         # Loss Layers
-        self.loss_fn = losses_and_metrics.MatchingLoss(name='MatchingLoss')
+        self.loss_fn = losses_and_metrics.MatchingLoss(
+                                            category_weight=category_weight, 
+                                            box_weight=box_weight, 
+                                            attribute_weight=attribute_weight, 
+                                            exist_weight=exist_weight, 
+                                            name='MatchingLoss')
 
     def get_config(self):
         config = super().get_config()
@@ -199,7 +209,6 @@ class DETR(tf.keras.Model):
             self.add_metric(iou_metric_i, 'IOU')
 
             return y_pred
-            #return loss, y_true, y_pred
 
         # Prediction Heads
         cat_preds = self.CategoryPredictionHead([decoder_features], training=training)  # [batch, objs, num_cats]

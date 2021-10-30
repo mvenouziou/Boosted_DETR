@@ -10,8 +10,104 @@ with minor modification preventing nan values.
 Main Layers:
 ImageEncoderAttention()
 DecoderAttention()
-PanopticAttention() # not fully tested
+PanopticAttention()  # not tested
 """
+
+# Note: keras MHA layer is not in the TF javascript API that we may want to use. 
+# The version below uses compatible ops.
+class MultiheadAttention(tf.keras.layers.Layer):
+    
+    def __init__(self, num_attention_heads, dim, name='MultiheadAttention', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.num_attention_heads = num_attention_heads
+        self.dim = dim
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({'num_attention_heads': self.num_attention_heads,
+                       'dim': self.dim})
+        return config
+
+    def build(self, input_shape):
+        self.query_shape = input_shape[0]
+        self.key_shape = input_shape[1]
+        self.value_shape = input_shape[2]
+
+        query_dim = self.query_shape[-1]
+        proj_dim = self.num_attention_heads * self.dim
+        self.Rescale =  tf.keras.layers.Rescaling(
+            scale=1.0 / tf.math.sqrt(tf.cast(self.dim, tf.float32)), name='Rescale')
+
+        self.QueryProjection = tf.keras.layers.Dense(proj_dim, 
+                    kernel_initializer='glorot_normal', name='QueryProjection')
+        self.KeyProjection = tf.keras.layers.Dense(proj_dim, 
+                    kernel_initializer='glorot_normal', name='KeyProjection')
+        self.ValueProjection = tf.keras.layers.Dense(proj_dim, 
+                    kernel_initializer='glorot_normal', name='ValueProjection')
+        self.OutputProjection = tf.keras.layers.Dense(query_dim, 
+                    kernel_initializer='glorot_normal', name='OutputProjection')
+
+        self.ReshapeQuery = tf.keras.layers.Reshape(
+            [self.query_shape[1], self.num_attention_heads, self.dim], name='ReshapeQuery')
+        self.ReshapeKey = tf.keras.layers.Reshape(
+            [self.key_shape[1], self.num_attention_heads, self.dim], name='ReshapeKey')
+        self.ReshapeValue = tf.keras.layers.Reshape(
+            [self.value_shape[1], self.num_attention_heads, self.dim], name='ReshapeValue')
+        self.ReshapePreOutput = tf.keras.layers.Reshape(
+            [self.query_shape[1], proj_dim], name='ReshapePreOutput')
+        
+        self.PermuteQuery = tf.keras.layers.Permute([2,1,3], name='PermuteQuery')
+        self.PermuteKey = tf.keras.layers.Permute([2,3,1], name='PermuteKey')
+        self.PermuteValue = tf.keras.layers.Permute([2,1,3], name='PermuteValue')
+
+        self.MatMulQueryKey = tf.keras.layers.Lambda(
+            lambda x: tf.linalg.matmul(x[0], x[1]), name='MatMulQueryKey')
+        self.MatMulQueryValue = tf.keras.layers.Lambda(
+            lambda x: tf.linalg.matmul(x[0], x[1]), name='MatMulQueryValue')  # requires value_steps=key_steps
+
+    def call(self, inputs, attention_mask=None, training=False):
+        query, key, value = inputs
+        
+        # projections
+        query = self.QueryProjection(query)  # [batch, query_steps, num_attention_heads * dim]
+        key = self.KeyProjection(key)  # [batch, key_steps, num_attention_heads * dim]
+        value = self.ValueProjection(value)  # [batch, value_steps, num_attention_heads * dim]
+
+        # separate out the heads
+        query = self.ReshapeQuery(query)  # [batch, query_steps, num_attention_heads, dim]
+        key = self.ReshapeKey(key)  # [batch, key_steps, num_attention_heads, dim]
+        value = self.ReshapeValue(value)  # [batch, value_steps, num_attention_heads, dim]
+
+        # rearrange for aligned matrix multiplications
+        query = self.PermuteQuery(query)   # [batch, num_attention_heads, dim, key_steps]
+        key = self.PermuteKey(key)   # [batch, num_attention_heads, dim, key_steps]
+        value = self.PermuteValue(value)   # [batch, num_attention_heads, value_steps, dim]
+
+        # query-key interaction
+        x = self.MatMulQueryKey([query, key])  # [batch, num_attention_heads, query_steps, key_steps]
+        x = self.Rescale(x)
+        x = tf.keras.activations.softmax(x, axis=-1)  # softmax along the key_steps axis
+
+        # apply masking. mask should have 0's for masked positions, 1's otherwise
+        if attention_mask is None:
+            attention_mask = tf.ones_like(x)        
+        x = x * attention_mask
+
+        # query-value interaction
+        x = self.MatMulQueryValue([x, value])  # [batch, query_steps, num_attention_heads, dim]
+
+        # project back to original dim
+        x = self.ReshapePreOutput(x)  # [batch, query_steps, num_attention_heads * dim]
+        x = self.OutputProjection(x)  # [batch, query_steps, query_dim]
+        return x
+
+    def show_summary(self):
+        query = tf.keras.layers.Input(self.query_shape[1:], name='query')
+        key = tf.keras.layers.Input(self.key_shape[1:], name='key')
+        value = tf.keras.layers.Input(self.value_shape[1:], name='value')
+        inputs=[query, key, value]
+        return tf.keras.Model(inputs=inputs, outputs=self.call(inputs)).summary()
+
 
 class AttentionBlock(tf.keras.layers.Layer):
 
@@ -30,27 +126,25 @@ class AttentionBlock(tf.keras.layers.Layer):
         self.value_shape = input_shape[2]
 
         query_dim = self.query_shape[-1]
-        key_dim = tf.math.maximum(1, query_dim // self.num_attention_heads)
+        key_dim = query_dim // self.num_attention_heads
 
-        self.AttentionLayer = tf.keras.layers.MultiHeadAttention(
-                                        num_heads=self.num_attention_heads,
-                                        key_dim=key_dim,
-                                        dropout=0.1,
-                                        name='AttentionLayer')
+        self.AttentionLayer = MultiheadAttention(num_attention_heads=self.num_attention_heads,
+                                                 dim=key_dim,
+                                                 name='AttentionLayer')
 
+        self.Dropout = tf.keras.layers.Dropout(rate=.1, name='Dropout')
         self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
         self.LayerNorm = tf.keras.layers.LayerNormalization(epsilon=1e-3, name='LayerNorm')
 
-    def call(self, inputs, training=False, attention_mask=None):
+    def call(self, inputs, attention_mask=None, training=False):
 
         query, key, value = inputs
 
-        attention_features = self.AttentionLayer(query=query,
-                                                 value=value,
-                                                 key=key,
+        attention_features = self.AttentionLayer([query, key, value],
                                                  attention_mask=attention_mask,
                                                  training=training)
 
+        attention_features = self.Dropout(attention_features, training=training)
         query = self.Add([query, attention_features])
         query = self.LayerNorm(query, training=training)
 
@@ -77,9 +171,12 @@ class FeedForwardBlock(tf.keras.layers.Layer):
         features_dim = self.features_shape[-1]
 
         # feed forward
-        self.DenseRelu = tf.keras.layers.Dense(features_dim, activation='relu', name='DenseRelu')
-        self.DenseLinear = tf.keras.layers.Dense(features_dim, activation=None, name='DenseLinear')
+        self.DenseRelu = tf.keras.layers.Dense(features_dim, activation='relu', 
+                            kernel_initializer='glorot_normal', name='DenseRelu')
+        self.DenseLinear = tf.keras.layers.Dense(features_dim, activation=None, 
+                            kernel_initializer='glorot_normal', name='DenseLinear')
         self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
+        self.Dropout = tf.keras.layers.Dropout(rate=.1, name='Dropout')
         self.LayerNorm = tf.keras.layers.LayerNormalization(name='LayerNorm')
 
     def call(self, inputs, training=False):
@@ -88,6 +185,8 @@ class FeedForwardBlock(tf.keras.layers.Layer):
         # Feed Forward block
         dense_features = self.DenseRelu(features)
         dense_features = self.DenseLinear(dense_features)
+
+        dense_features = self.Dropout(dense_features, training=training)
         features = self.Add([features, dense_features])
         features = self.LayerNorm(features, training=training)
 
@@ -157,7 +256,8 @@ class ImageEncoderAttention(tf.keras.layers.Layer):
 
     def get_config(self):
         config = super().get_config()
-        config.update({'num_blocks': self.num_blocks, 'num_attention_heads': self.num_attention_heads})
+        config.update({'num_blocks': self.num_blocks, 
+                       'num_attention_heads': self.num_attention_heads})
         return config
 
     def build(self, input_shape):
@@ -169,10 +269,14 @@ class ImageEncoderAttention(tf.keras.layers.Layer):
 
         # reshaping layers
         self.GetBatchDim = tf.keras.layers.Lambda(lambda x: tf.shape(x)[0], name='GetBatchDim')
-        self.TileBatch3D = tf.keras.layers.Lambda(lambda x: tf.tile(x[0], [x[1], 1, 1, 1]), name='TileBatch2D')
-        self.Flatten2D = tf.keras.layers.Reshape([num_encoder_row*num_encoder_col, encoder_dim], name='Flatten2D')
-        self.Reshape3D_Encoder = tf.keras.layers.Reshape([num_encoder_row, num_encoder_col, encoder_dim], name='Reshape3D_Encoder')
-        self.Reshape3D_Positional = tf.keras.layers.Reshape([num_encoder_row, num_encoder_col, encoder_dim], name='Reshape3D_Positional')
+        self.TileBatch3D = tf.keras.layers.Lambda(
+                    lambda x: tf.tile(x[0], [x[1], 1, 1, 1]), name='TileBatch2D')
+        self.Flatten2D = tf.keras.layers.Reshape(
+            [num_encoder_row*num_encoder_col, encoder_dim], name='Flatten2D')
+        self.Reshape3D_Encoder = tf.keras.layers.Reshape(
+            [num_encoder_row, num_encoder_col, encoder_dim], name='Reshape3D_Encoder')
+        self.Reshape3D_Positional = tf.keras.layers.Reshape(
+            [num_encoder_row, num_encoder_col, encoder_dim], name='Reshape3D_Positional')
 
         # (Fixed) positional encoding variable on inputs (spacial component only)
         def trig(k, dim):
@@ -271,7 +375,7 @@ class DecoderBlock(tf.keras.layers.Layer):
         encoder_value, decoder_features, encoder_key, decoder_positional = inputs
 
         # Self Attention
-        query = decoder_features  # decoder_features + decoder_positional is commented out. This is what seems to be used in the paper's diagram, but is causing nans. Instead the standard AIAYN version is used
+        query = decoder_features  # decoder_features + decoder_positional is commented out. This is what seems to be used in the paper's diagram, but is producing NaN problems. Instead the standard AIAYN version is used
         key = decoder_features  # decoder_features + decoder_positional
         value = decoder_features
 
@@ -312,16 +416,19 @@ class DecoderPrep(tf.keras.layers.Layer):
         # Reshaping
         self.GetBatchDim = tf.keras.layers.Lambda(lambda x: tf.shape(x)[0], name='GetBatchDim')
         self.TileBatch2D = tf.keras.layers.Lambda(lambda x: tf.tile(x[0], [x[1], 1, 1]), name='TileBatch')
-        self.Flatten2D_Image = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
-        self.Flatten2D_Positional = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
+        self.Flatten2D_Image = tf.keras.layers.Reshape
+                ([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
+        self.Flatten2D_Positional = tf.keras.layers.Reshape(
+                [num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
 
         # encoder key adjustment
         self.Add = tf.keras.layers.Add(dtype=tf.float32, name='Add')
 
-        # initial decoder input (treated as positional encoding)
-        initializer = tf.random_normal_initializer()
+        # initial decoder input (treated as positional encoding). Make sure trainable=True!
+        initializer = tf.zeros_initializer()
         init_decoder_features = initializer([self.num_object_preds, self.decoder_dim], tf.float32)
-        self.init_decoder_features = tf.Variable(init_decoder_features, trainable=True, name='init_decoder_features')
+        self.init_decoder_features = tf.Variable(init_decoder_features, 
+                                                 trainable=True, name='init_decoder_features')
 
     def call(self, inputs, training=False):
         encoder_features, encoder_positional = inputs
@@ -383,9 +490,12 @@ class PanopticAttention(tf.keras.layers.Layer):
         value_dim = num_obj  # non-standard
 
         # attention projections
-        self.ValueProjection = tf.keras.layers.Dense(self.num_attention_heads*value_dim, name='ValueProjection')
-        self.KeyProjection = tf.keras.layers.Dense(self.num_attention_heads*key_dim, name='KeyProjection')
-        self.QueryProjection = tf.keras.layers.Dense(self.num_attention_heads*key_dim, name='QueryProjection')
+        self.ValueProjection = tf.keras.layers.Dense(self.num_attention_heads*value_dim, 
+                                                     name='ValueProjection')
+        self.KeyProjection = tf.keras.layers.Dense(self.num_attention_heads*key_dim, 
+                                                   name='KeyProjection')
+        self.QueryProjection = tf.keras.layers.Dense(self.num_attention_heads*key_dim, 
+                                                     name='QueryProjection')
 
         # attention calculations
         self.MatMul_1 = tf.keras.layers.Lambda(lambda x: tf.linalg.matmul(x[0], x[1]), name='MatMul_1')
@@ -396,9 +506,12 @@ class PanopticAttention(tf.keras.layers.Layer):
         self.Softmax = tf.keras.layers.Softmax(name='Softmax')
 
         # reshaping layers
-        self.Flatten2D_Image = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
-        self.Flatten2D_Positional = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
-        self.ReshapeOutput = tf.keras.layers.Reshape([num_rows, num_cols, num_obj, -1], name='ReshapeOutput')
+        self.Flatten2D_Image = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], 
+                                                       name='Flatten2D_Image')
+        self.Flatten2D_Positional = tf.keras.layers.Reshape([num_rows*num_cols, encoder_dim], 
+                                                            name='Flatten2D_Positional')
+        self.ReshapeOutput = tf.keras.layers.Reshape([num_rows, num_cols, num_obj, -1], 
+                                                     name='ReshapeOutput')
 
         # other layers
         self.Add = tf.keras.layers.Add(name='Add')
