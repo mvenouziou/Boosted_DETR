@@ -416,8 +416,8 @@ class DecoderPrep(tf.keras.layers.Layer):
         # Reshaping
         self.GetBatchDim = tf.keras.layers.Lambda(lambda x: tf.shape(x)[0], name='GetBatchDim')
         self.TileBatch2D = tf.keras.layers.Lambda(lambda x: tf.tile(x[0], [x[1], 1, 1]), name='TileBatch')
-        self.Flatten2D_Image = tf.keras.layers.Reshape
-                ([num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
+        self.Flatten2D_Image = tf.keras.layers.Reshape(
+                [num_rows*num_cols, encoder_dim], name='Flatten2D_Image')
         self.Flatten2D_Positional = tf.keras.layers.Reshape(
                 [num_rows*num_cols, encoder_dim], name='Flatten2D_Positional')
 
