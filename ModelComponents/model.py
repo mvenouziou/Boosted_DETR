@@ -11,7 +11,8 @@ import losses_and_metrics
 
 class DETR(tf.keras.Model):
     """
-    Note: Losses are built directly into the model.
+    Note: Losses are built directly into the model. 
+    Note: Training data box vals must be provided in COCO format!
 
     This is a DETR-like model for fine-grained object detection and description.
     DETR is published under the Apache License 2.0. This model was independently
@@ -19,6 +20,11 @@ class DETR(tf.keras.Model):
     by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier,
     Alexander Kirillov and Sergey Zagoruyko available at
     https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers.
+
+    Note: There is a hard-coded line of the form 'use_intermediate_losses = False'
+    In the call() function to control whether intermediate losses are used in 
+    gradient calculations. Recommend keeping this off unless larger batch sizes 
+    and longer training runs are possible.
     """
 
     def __init__(self, num_object_preds, image_size,
@@ -28,10 +34,10 @@ class DETR(tf.keras.Model):
                        vocab_dict, attribute_weight=1.0, name='DETR', **kwargs):
         super().__init__(name=name)
 
-        # loss weights. These can be changed between model initializations without affecting learned params.
+        # loss weights. 
         category_weight = 1.0
         box_weight = 1.0
-        attribute_weight = attribute_weight
+        attribute_weight = attribute_weight  # should set to 0 if attributes not labeled in training set
         exist_weight = 1.0
 
         self.num_object_preds = num_object_preds  # ideally >> max objects in training set
@@ -166,30 +172,32 @@ class DETR(tf.keras.Model):
         exist_loss = 0.0
         iou_metric = 0.0
 
+        use_intermediate_losses = False
         for i in range(self.num_decoder_blocks):
             decoder_features = self.DecoderBlocks[i](
                 [encoder_features, decoder_features, encoder_key, decoder_positional],
                 training=training)
 
             if training:
+                if use_intermediate_losses or i >= self.num_decoder_blocks-1:
 
-                # compute intermediary losses / predictions at each decoder step
-                cat_preds_i = self.CategoryPredictionHead([decoder_features], training=training)  # [batch, objs, num_cats]
-                attribute_preds_i = self.AttributePredictionHead([decoder_features], training=training)  # [batch, objs, num_attributes]
-                box_coord_preds_i = self.BoxPredictionHead([decoder_features], training=training)  # [batch, objs, 4 coords]
-                y_pred_i = [cat_preds_i, attribute_preds_i, box_coord_preds_i]
+                    # compute intermediary losses / predictions at each decoder step
+                    cat_preds_i = self.CategoryPredictionHead([decoder_features], training=training)  # [batch, objs, num_cats]
+                    attribute_preds_i = self.AttributePredictionHead([decoder_features], training=training)  # [batch, objs, num_attributes]
+                    box_coord_preds_i = self.BoxPredictionHead([decoder_features], training=training)  # [batch, objs, 4 coords]
+                    y_pred_i = [cat_preds_i, attribute_preds_i, box_coord_preds_i]
 
-                # compute losses and metrics
-                losses_i, metrics_i = self.loss_fn([y_true, y_pred_i])
+                    # compute losses and metrics
+                    losses_i, metrics_i = self.loss_fn([y_true, y_pred_i])
 
-                # accumulate losses
-                loss_i, cat_loss_i, att_loss_i, box_loss_i, exist_loss_i = losses_i
+                    # accumulate losses
+                    loss_i, cat_loss_i, att_loss_i, box_loss_i, exist_loss_i = losses_i
 
-                loss = loss + loss_i
-                cat_loss = cat_loss + cat_loss_i
-                att_loss = att_loss + att_loss_i
-                box_loss = box_loss + box_loss_i
-                exist_loss = exist_loss + exist_loss_i
+                    loss = loss + loss_i
+                    cat_loss = cat_loss + cat_loss_i
+                    att_loss = att_loss + att_loss_i
+                    box_loss = box_loss + box_loss_i
+                    exist_loss = exist_loss + exist_loss_i
 
         if training:
             # record loss

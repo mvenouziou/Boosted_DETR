@@ -6,24 +6,20 @@ import tensorflow_addons as tfa
 
 
 # basic loss components
-L1_loss = tf.keras.losses.MeanAbsoluteError(reduction=tf.keras.losses.Reduction.NONE)
+L2_loss = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
 GIOU_loss = lambda x, y: tfa.losses.giou_loss(x, y, mode='giou')
 GIOU_Metric = lambda x, y: 1.0 - GIOU_loss(x, y)
 IOU_loss = lambda x, y: tfa.losses.giou_loss(x, y, mode='iou')
 IOU_Metric = lambda x, y: 1.0 - IOU_loss(x, y)
 SigmoidFocalCrossEntropy = tfa.losses.SigmoidFocalCrossEntropy(reduction=tf.keras.losses.Reduction.NONE)
 BinaryCrossentropy = tf.keras.losses.BinaryCrossentropy(
-        label_smoothing=.1, reduction=tf.keras.losses.Reduction.NONE)
-CategoricalCrossentropy = tf.keras.losses.BinaryCrossentropy(
+        label_smoothing=0, reduction=tf.keras.losses.Reduction.NONE)
+CategoricalCrossentropy = tf.keras.losses.CategoricalCrossentropy(
         label_smoothing=.1, reduction=tf.keras.losses.Reduction.NONE)
 
 
 def safe_clip(probability):
-    """ scale/shift a probability away from 0 and 1.
-    Used for bounding logarithm outputs. """
-    epsilon = .0001
-    factor = 1.0 - 2.0 * epsilon
-    return factor * probability + epsilon
+    return tf.clip_by_value(probability, clip_value_min=.001, clip_value_max=.999)
 
 def apply_mask(mask, tensor):
     # ensures matching dtypes while preserving tensor dtype
@@ -33,7 +29,7 @@ def ExistLoss(y_true, y_pred):
     # assigns error based on prediction of 'None' class
     y_true = tf.cast(y_true, tf.float32)
     y_pred = tf.cast(y_pred, tf.float32)
-    return BinaryCrossentropy(y_true, y_pred)
+    return BinaryCrossentropy(y_true, safe_clip(y_pred))
 
 def CategoryMatchLoss(y_true, y_pred):
     # crossentropy without the logarithm. y_true acts as a mask
@@ -41,27 +37,39 @@ def CategoryMatchLoss(y_true, y_pred):
     return tf.reduce_sum((1.0 - y_pred) * y_true, axis=-1)
 
 def CategoryLoss(y_true, y_pred):
-    # this is a binary loss on just the true category. (y_true acts as a mask)
+    # this is a binary loss on just the true category. 
+    # (note: y_true is used as a mask on y_pred)
     y_true = tf.cast(y_true, tf.float32)
     y_pred = tf.cast(y_pred, tf.float32)
-    return BinaryCrossentropy(y_true, safe_clip(y_pred * y_true))
+    return BinaryCrossentropy(y_true, safe_clip(y_pred)*y_true)
 
 def AttributeLoss(y_true, y_pred):
     if tf.math.not_equal(tf.shape(y_true)[-1], 1):
         y_true = tf.expand_dims(y_true, axis=-1)
-
     if tf.math.not_equal(tf.shape(y_pred)[-1], 1):
         y_pred = tf.expand_dims(y_pred, axis=-1)
-    return SigmoidFocalCrossEntropy(y_true, y_pred)
+    return SigmoidFocalCrossEntropy(y_true, safe_clip(y_pred))
 
-def BoxLoss(y_true, y_pred, giou_weight=5.0, l1_weight=1.0):
-    return giou_weight * GIOU_loss(y_true, y_pred) + l1_weight * L1_loss(y_true, y_pred)
+def coco_to_tf(box):
+    """ converts from label data's COCO [xmin, ymin, width, height] format
+    to Tensorflow [y_min, x_min, y_max, x_max] format"""
+    xmin = box[..., 0:1]
+    ymin = box[..., 1:2]
+    width = box[..., 2:3]
+    height = box[..., 3:4]
+    return tf.concat([ymin, xmin, ymin + height, xmin + width], axis=-1)
+
+def BoxLoss(y_true, y_pred, giou_weight=2.0, l2_weight=5.0):
+    # convert from COCO to tensorflow format and apply losses
+    y_true_tf = coco_to_tf(y_true)
+    y_pred_tf = coco_to_tf(y_pred)
+    return giou_weight * GIOU_loss(y_true_tf, y_pred_tf) + l2_weight * L2_loss(10.0*y_true_tf, 10.0*y_pred_tf)
 
 
 class MatchingLoss(tf.keras.layers.Layer):
     def __init__(self, name='MatchingLoss', 
-                 category_weight = 5.0, box_weight = 1.0, attribute_weight = 1.0,
-                 exist_weight = 1.0, **kwargs):
+                 category_weight=1.0, box_weight=1.0, attribute_weight=1.0,
+                 exist_weight=1.0, **kwargs):
         super().__init__(name=name, dtype=tf.float32, **kwargs)
 
         # weights
@@ -92,10 +100,6 @@ class MatchingLoss(tf.keras.layers.Layer):
         category, attribute, bbox, num_objects = y_true
         cat_preds, attribute_preds, box_preds = y_pred
 
-        # restrict values for nan-prevention
-        cat_preds = self.safe_clip(cat_preds)
-        attribute_preds = self.safe_clip(attribute_preds)
-
         # get pairwise costs
         category_cost = self.CostArray(category, cat_preds, self.CategoryLoss)
         attribute_cost = self.CostArray(attribute, attribute_preds, self.AttributeLoss)
@@ -117,16 +121,19 @@ class MatchingLoss(tf.keras.layers.Layer):
         box_cost = self.apply_mask(assignment_mask, box_cost)
 
         # get object existence cost
-        exist_cost = self.exist_weight * self.ExistLoss(assigned_predictions, cat_preds[ ..., 0:1])
+        # items not assigned should have high prob assigned to class 0
+        exist_cost = self.exist_weight * self.ExistLoss(1.0 - assigned_predictions, 
+                                                        cat_preds[ ..., 0:1])
 
         # get mean total
         # mean over actual objects (masked costs only 'num_objects' nonzero entries )
-        total_num_objects = tf.cast(tf.reduce_sum(num_objects), tf.float32) + 1.0
+        total_num_objects = 1.0 + tf.cast(tf.reduce_sum(num_objects), tf.float32)
+        num_preds_per_batch = 1.0 + tf.cast(tf.shape(cat_preds)[1], tf.float32)
 
         category_cost = tf.reduce_sum(category_cost, axis=[-2, -1]) / total_num_objects
         attribute_cost = tf.reduce_sum(attribute_cost, axis=[-2, -1]) / total_num_objects
-        box_cost = tf.reduce_sum(box_cost, axis=[-2, -1]) / total_num_objects
-        exist_cost = tf.reduce_mean(exist_cost, axis=-1) / total_num_objects  # extra downweighting with num objects
+        box_cost = tf.reduce_sum(box_cost, axis=[-2, -1]) / total_num_objects       
+        exist_cost = tf.reduce_mean(exist_cost, axis=-1) / num_preds_per_batch  # downweight for class imbalance
 
         # total cost
         total_loss = category_cost + attribute_cost + box_cost + exist_cost
@@ -184,9 +191,9 @@ class MatchingMask(tf.keras.layers.Layer):
         # get matching assignment mask
         assignment_mask = self.MatchingAssignment(matching_costs, num_objects)
 
-        # find objects that were not assigned
-        assigned_predictions = tf.reduce_max(assignment_mask, axis=-2)
-        assigned_predictions = tf.expand_dims(assigned_predictions, axis=-1)
+        # get indicator showing which predictions were assigned an object
+        assigned_predictions = tf.reduce_max(assignment_mask, axis=-2)  # = 0 or 1 at each position
+        assigned_predictions = tf.expand_dims(assigned_predictions, axis=-1)  # [batch, num_preds, 1]
 
         return assignment_mask, assigned_predictions
 

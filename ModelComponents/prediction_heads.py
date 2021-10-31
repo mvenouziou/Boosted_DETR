@@ -71,8 +71,10 @@ class BoxPredictionHead(tf.keras.layers.Layer):
 
 class SingleClassPredictionHead(tf.keras.layers.Layer):
     """
+    Produces softmax probs for single class prediction 
+
     input: feature vector [batch, num obj preds, feature_dim]
-    outputs: [batch, num_obj, num_categories]
+    outputs: [batch, num_obj, num_classes]
     """
 
     def __init__(self, num_classes, hidden_dim, num_preds, name='SingleClassPredictionHead', **kwargs):
@@ -136,6 +138,13 @@ class SingleClassPredictionHead(tf.keras.layers.Layer):
 
 
 class MultiClassPredictionHead(tf.keras.layers.Layer):
+    """
+    Similar to SingleClassPredictionHead, except outputs independent sigmoid predictions for each class.
+    Used when a single object is labelled with multiple values.
+
+    input: feature vector [batch, num obj preds, feature_dim]
+    outputs: [batch, num_obj, num_classes]
+    """
 
     def __init__(self, num_classes, hidden_dim, num_preds, name='MultiClassPredictionHead', **kwargs):
         super().__init__(name=name, **kwargs)
