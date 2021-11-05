@@ -30,15 +30,19 @@ class DETR(tf.keras.Model):
     def __init__(self, num_object_preds, image_size,
                        num_encoder_blocks, num_encoder_heads, encoder_dim,
                        num_decoder_blocks, num_decoder_heads, decoder_dim,
-                       num_panoptic_heads, panoptic_dim,
-                       vocab_dict, attribute_weight=1.0, name='DETR', **kwargs):
+                       num_panoptic_heads, panoptic_dim, vocab_dict, 
+                       classification_only=False, attribute_weight=1.0, name='DETR', **kwargs):
         super().__init__(name=name)
 
         # loss weights. 
-        category_weight = 1.0
-        box_weight = 1.0
-        attribute_weight = attribute_weight  # should set to 0 if attributes not labeled in training set
-        exist_weight = 1.0
+        # note: do not add to model.config() so these can be changed without saved model conflicts
+        attribute_weight = attribute_weight  # can be set to 0 if attributes not labeled in training set        
+        category_weight = None  # will use default weight
+        box_weight = None  # will use default weight
+        exist_weight = None  # will use default weight
+
+        if classification_only:
+            box_weight = 0.0
 
         self.num_object_preds = num_object_preds  # ideally >> max objects in training set
         self.image_size = image_size

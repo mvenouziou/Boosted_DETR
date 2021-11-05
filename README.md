@@ -4,6 +4,15 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
+---
+Official DETR was trained on COCO for 3 days on 16 GPU's --the equivalent of **1152 GPU hours**. Here are some examples of my own resource-limited training on the smaller Fashionpedia (COCO-format) dataset.
+
+48 GPU Hours: A big jumble, the model is producing many false positives.
+![](validation_sample_image_day_ 2_of_48.png "Day 2")
+
+96 GPU Hours: The model has become much more selective and learned prior probabilities for common items. It knows a belt belongs on the waist, but produces false positives.
+![](validation_sample_image_day_ 4_of_48.png "Day 2")
+
 ----
 
 ## Model Features:
@@ -20,11 +29,11 @@ The description below outlines unique features, novel model architectures ideas,
   -   (Note: training benefits of this sub-model provides not yet evaluated/optimized.)  
 
 **Built-in Text Tokenization / De-Tokenization**
-  -   All model inputs and ouputs are human-readable, with no discernable cost to training or inference speed. 
+  -   All model inputs and ouputs are human-readable, with no discernable cost to training or inference speed.
   -   Note that while text data isn't compatible with Tensroflow TPU training at this time, TPU incompatibility is already a consequence of a fundamental feature of the DETR architecture. (See notes section below.)
 
 **Custom Data Pipeline**
-  -   Automatically load COCO-format object detection data as TF Datasets with optional image augmentations. 
+  -   Automatically load COCO-format object detection data as TF Datasets with optional image augmentations.
   -   All class / subclass information is presented to the user as text. (Standard COCO datasets are typically pre-tokenized, requiring de-tokenization in order to interpret values.)
 
 ----
@@ -38,19 +47,19 @@ The description below outlines unique features, novel model architectures ideas,
 *Alternative: Predict confidence estimates after each deder block. If a threshhold is reached, output predictions from that block and skip subsequent decoder blocks.*
 
   -   Pro: "Easy" images use fewer computations. "Difficult" images still have access to the full model.
-  -   Pro: Allows larger decoder network with the same average image inference cost. 
+  -   Pro: Allows larger decoder network with the same average image inference cost.
   -   Con: Added inference & training costs to create reliable confidence level predictions after every decoder block.
   -   Unkown: Net effect on inference quality.
- 
+
 **Adaptive Encoder + Decoder Size**
 
 *Use an adaptive encoder as well as adaptive decoder size.*
 
-  -   Pro: Adds variety to the number of encoder features seen by the decoder. 
+  -   Pro: Adds variety to the number of encoder features seen by the decoder.
   -   Pro: encoder blocks deferred until needed. Imporved inference speed at any given decoder block, since fewer encoder blocks used.
   -   Con: Alters model architecture in a way likely to increase training time on what is already a computationally intensive training regime.
   -   Unkown: Effect on prediction quality and early stopping decisions
-  
+
 **Boosted Ensemble**
 
 *Extension of the adaptive encoder/decoder architecture proposed above. Standard DETR was found to perform below state-of-the-art when dealing with small objects. The leading small-object detectors all have shared prediction heads that access features from multiple (convolutional) encoder scales, and produce a much larger number of predictions. The adaptive encoder/decoder DETR proposal is analogous to using CNN courseness levels to detect objects with a wide variety of sizes and increases the number of predictions made.*
@@ -95,7 +104,7 @@ Instead of producing thousands of bad predictions and whittling them down to a f
 
 The decoder trains individual detector objects, vectors whose role is to interact with the encoder through joint and self-attention. Each detector is responsible for a single object prediction. Once trained, these detectors are treated as fixed inputs to the Transformer Decoder, constants entirely independent of the image encodings they will interact with. This design as independent constants allows them to be trained in parallel without masking.
 
-DETR also replaces the non-trained techniques such as non-max suppression (NMS) with a fully trainable "end-to-end" process using bipartite matching. The resulting object detection model became the new state of the art for larger object detection, but lags behind in small-object detection. 
+DETR also replaces the non-trained techniques such as non-max suppression (NMS) with a fully trainable "end-to-end" process using bipartite matching. The resulting object detection model became the new state of the art for larger object detection, but lags behind in small-object detection.
 
 
 ----

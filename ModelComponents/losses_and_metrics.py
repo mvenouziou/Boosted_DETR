@@ -4,6 +4,11 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 import tensorflow_addons as tfa
 
+# default weights. Include here so they can be (optionally) be left out of model def
+DEFAULT_CATEGORY_WEIGHT = 1000.0
+DEFAULT_BOX_WEIGHT = 1.0
+DEFAULT_ATTRIBUTE_WEIGHT = 100.0
+DEFAULT_EXIST_WEIGHT = 100.0
 
 # basic loss components
 L2_loss = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
@@ -48,7 +53,8 @@ def AttributeLoss(y_true, y_pred):
         y_true = tf.expand_dims(y_true, axis=-1)
     if tf.math.not_equal(tf.shape(y_pred)[-1], 1):
         y_pred = tf.expand_dims(y_pred, axis=-1)
-    return SigmoidFocalCrossEntropy(y_true, safe_clip(y_pred))
+    cost = SigmoidFocalCrossEntropy(y_true, safe_clip(y_pred))
+    return tf.reduce_mean(cost, axis=-1)  # average across num attributes
 
 def coco_to_tf(box):
     """ converts from label data's COCO [xmin, ymin, width, height] format
@@ -68,11 +74,20 @@ def BoxLoss(y_true, y_pred, giou_weight=2.0, l2_weight=5.0):
 
 class MatchingLoss(tf.keras.layers.Layer):
     def __init__(self, name='MatchingLoss', 
-                 category_weight=1.0, box_weight=1.0, attribute_weight=1.0,
-                 exist_weight=1.0, **kwargs):
+                 category_weight=None, box_weight=None, attribute_weight=None,
+                 exist_weight=None, **kwargs):
         super().__init__(name=name, dtype=tf.float32, **kwargs)
 
-        # weights
+        # default weights
+        if category_weight is None:
+            category_weight = DEFAULT_CATEGORY_WEIGHT
+        if box_weight is None:
+            box_weight = DEFAULT_BOX_WEIGHT
+        if attribute_weight is None:
+            attribute_weight = DEFAULT_ATTRIBUTE_WEIGHT
+        if exist_weight is None:
+            exist_weight = DEFAULT_EXIST_WEIGHT
+
         self.category_weight = tf.cast(category_weight, tf.float32)
         self.box_weight = tf.cast(box_weight, tf.float32)
         self.attribute_weight = tf.cast(attribute_weight, tf.float32)
@@ -112,11 +127,10 @@ class MatchingLoss(tf.keras.layers.Layer):
 
         # get assignment mask    
         assignment_mask, assigned_predictions = self.MatchingMask(
-                                    [category_cost + box_cost, num_objects])
+                        [category_cost + box_cost + attribute_cost, num_objects])
 
         # apply cost mask        
         category_cost = self.apply_mask(assignment_mask, category_cost)
-        attribute_cost = tf.reduce_mean(attribute_cost, axis=[3])
         attribute_cost = self.apply_mask(assignment_mask, attribute_cost)
         box_cost = self.apply_mask(assignment_mask, box_cost)
 

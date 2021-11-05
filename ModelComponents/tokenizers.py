@@ -21,17 +21,17 @@ class Tokenization(tf.keras.layers.Layer):
         # Category
         self.tokenizer_category = tf.keras.layers.experimental.preprocessing.StringLookup(
                 invert=False, vocabulary=self.vocab_dict['category'], output_mode='int',
-                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)        
+                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)
 
         # Features
         self.tokenizer_attributes = tf.keras.layers.experimental.preprocessing.StringLookup(
                 invert=False, vocabulary=self.vocab_dict['attribute'], output_mode='int',
-                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)        
+                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)
 
         # extra attribute
         self._vocab_size_category = len(self.tokenizer_category.get_vocabulary(include_special_tokens=True))
         self._vocab_size_attributes = len(self.tokenizer_attributes.get_vocabulary(include_special_tokens=True))
-    
+
     def get_config(self):
         config = super().get_config()
         config.update({'vocab_dict': self.vocab_dict,})
@@ -39,28 +39,28 @@ class Tokenization(tf.keras.layers.Layer):
 
     def call(self, inputs):
         """ Converts strings to multihot vector indicating category and attributes. """
-        
+
         category, attributes = inputs
 
-        # tokenize 
-        sparce_category = self.tokenizer_category(category)  # [batch, num_objects, 1]        
+        # tokenize
+        sparce_category = self.tokenizer_category(category)  # [batch, num_objects, 1]
         sparce_category = tf.squeeze(sparce_category, axis=2)  # [batch, num_objects]
         sparce_attributes = self.tokenizer_attributes(attributes)  # [batch, num_objects, num_attributes]
- 
+
         # convert to hot / multihot vector
         multihot_vectors = self.sparce_to_multihot(sparce_category, sparce_attributes)
 
         return multihot_vectors  # [one_hot_category, multi_hot_attributes]
 
     def sparce_to_multihot(self, sparce_category, sparce_attributes):
-        """ 
-        Converts spacre tokens to multihot vectors. 
+        """
+        Converts spacre tokens to multihot vectors.
 
         inputs:
         sparce_category: [batch, num objects, 1]
         sparce_attributes: [batch, num objects, num_padded_words]
 
-        output: 
+        output:
         multihot vector: [batch, num sentences, vocab_size_category + vocab_size_attributes]
         """
 
@@ -76,9 +76,9 @@ class Tokenization(tf.keras.layers.Layer):
         multi_hot_attributes = tf.math.reduce_max(one_hot_attributes, axis=2)  # [batch, num objects, vocab_size_attributes]
 
         # combine
-        multihot_vectors = [tf.cast(one_hot_category, tf.float32), 
+        multihot_vectors = [tf.cast(one_hot_category, tf.float32),
                             tf.cast(multi_hot_attributes, tf.float32)]
-        
+
         return multihot_vectors
 
     # Access attributes
@@ -103,17 +103,17 @@ class InverseTokenization(tf.keras.layers.Layer):
         # Category
         self.inverse_tokenizer_category = tf.keras.layers.experimental.preprocessing.StringLookup(
                 invert=True, vocabulary=self.vocab_dict['category'], output_mode='int',
-                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)        
+                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)
 
         # Features
         self.inverse_tokenizer_attributes = tf.keras.layers.experimental.preprocessing.StringLookup(
                 invert=True, vocabulary=self.vocab_dict['attribute'], output_mode='int',
-                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)        
+                oov_token=self.out_of_vocab_token, mask_token=self.mask_token)
 
         # extra attribute
         self._vocab_size_category = len(self.inverse_tokenizer_category.get_vocabulary(include_special_tokens=True))
         self._vocab_size_attributes = len(self.inverse_tokenizer_attributes.get_vocabulary(include_special_tokens=True))
-    
+
     def get_config(self):
         config = super().get_config()
         config.update({'vocab_dict': self.vocab_dict,})
@@ -123,16 +123,16 @@ class InverseTokenization(tf.keras.layers.Layer):
         """
         Converts probs vector to text values
         """
-        
+
         cat_preds, attribute_preds = inputs
 
         # get predictions (tokens)
-        tokens_categories = tf.argmax(cat_preds, axis=-1)  # sparce categ (batch, num_obj)  
-        tokens_categories = tf.expand_dims(tokens_categories, axis=-1)  # sparce categ (batch, num_obj, 1)  
+        tokens_categories = tf.argmax(cat_preds, axis=-1)  # sparce categ (batch, num_obj)
+        tokens_categories = tf.expand_dims(tokens_categories, axis=-1)  # sparce categ (batch, num_obj, 1)
 
-        multihot_attributes = tf.math.greater_equal(attribute_preds, .5)  # multihot indicator (batch, num_obj, num_attributes) 
+        multihot_attributes = tf.math.greater_equal(attribute_preds, .5)  # multihot indicator (batch, num_obj, num_attributes)
         multihot_attributes = tf.cast(multihot_attributes, dtype=tf.int32)
-        tokens_attributes = multihot_attributes * tf.range(self._vocab_size_attributes)  # sparce multivector (batch, num_obj, num_attributes) 
+        tokens_attributes = multihot_attributes * tf.range(self._vocab_size_attributes)  # sparce multivector (batch, num_obj, num_attributes)
 
         category, attributes = self.sparce_to_strings(tokens_categories, tokens_attributes)
 
@@ -144,14 +144,15 @@ class InverseTokenization(tf.keras.layers.Layer):
         category = self.inverse_tokenizer_category(tokens_categories)  # [batch, num_objects, 1 category]
         attributes = self.inverse_tokenizer_attributes(tokens_attributes)  # [batch, num_objects, num feature words]
 
-        # drop PAD and OOV       
+        # drop PAD and OOV
         attributes = tf.strings.reduce_join(attributes, axis=-1, separator=', ', keepdims=True)  # [batch, num_objects]
         attributes = tf.strings.regex_replace(attributes, self.mask_token, '')
         attributes = tf.strings.regex_replace(attributes, self.out_of_vocab_token, '')
 
         # strip extra whitespace
+        attributes = tf.strings.regex_replace(attributes, ' ,', '')  # interior
+        attributes = tf.strings.regex_replace(attributes, '\A, ', '')  # start
         attributes = tf.strings.strip(attributes)  # trailing / leading
-        attributes = tf.strings.regex_replace(attributes, ' +', ' ')  # interior
 
         return category, attributes
 
@@ -177,9 +178,8 @@ class BboxPrep(tf.keras.layers.Layer):
 
             # pad to non-ragged tensor
             default_value=tf.constant(-1.0, dtype=bbox.dtype)
-            bbox = bbox.to_tensor(default_value=default_value, 
-                                  shape=[batch_size, padded_objects, 4])   
+            bbox = bbox.to_tensor(default_value=default_value,
+                                  shape=[batch_size, padded_objects, 4])
 
 
         return bbox
-
