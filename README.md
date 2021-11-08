@@ -5,7 +5,7 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
 ---
-**The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to processing to match that... but let's see what can be achieved on Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. Official DETR exhibited difficulties with small objects, which are very prevalent in the Fashionpedia set.
+**The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to processing to match that... but let's see what my modified DETR can achieve on Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. This model includes an additional prediction head to detect auxillary features in the dataset. (COCO is not annotated in this way.) The dataset also includes many small objects, which official DETR exhibited difficulties with.
 
 - *@48 GPU Hours: a big jumble of many false positives. the model is still getting its bearings.*
 - <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png" alt="Day 2" style="width:200px;"/>
