@@ -5,13 +5,19 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
 ---
-Official DETR was trained on COCO for 3 days on 16 GPU's --the equivalent of **1152 GPU hours**. Here are some examples of my own resource-limited training on the smaller Fashionpedia (COCO-format) dataset.
+The Official DETR was trained on COCO for 3 days on 16 GPU's --the equivalent of **1152 GPU hours**! What can we expct from a Colab setup? Below are current examples from training on the smaller Fashionpedia (COCO-format) dataset.
 
-48 GPU Hours: A big jumble, the model is producing many false positives.
-![](validation_sample_image_day_ 2_of_48.png "Day 2")
+*@48 GPU Hours:* 
+- *A big jumble. The model is overconfident with many false positives.*
 
-96 GPU Hours: The model has become much more selective and learned prior probabilities for common items. It knows a belt belongs on the waist, but produces false positives.
-![](validation_sample_image_day_ 4_of_48.png "Day 2")
+![](https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png "Day 2")
+
+*@96 GPU Hours:*
+- *The model has learned prior probabilities and is selective with predictions. It understands locations (ex. a belt belongs on the waist), but produces false positives.*
+![](https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_4_of_48.png "Day 2")
+
+*@144 GPU Hours:* 
+- *tba*
 
 ----
 
