@@ -5,19 +5,16 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
 ---
-The Official DETR was trained on COCO for 3 days on 16 GPU's --the equivalent of **1152 GPU hours**! What can we expct from a Colab setup? Below are current examples from training on the smaller Fashionpedia (COCO-format) dataset.
+**The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to processing to match that... but let's see what can be achieved on Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. Official DETR exhibited difficulties with small objects, which are very prevalent in the Fashionpedia set.
 
-*@48 GPU Hours:* 
-- *A big jumble. The model is overconfident with many false positives.*
+- *@48 GPU Hours: a big jumble of many false positives. the model is still getting its bearings.*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png" alt="Day 2" style="width:200px;"/>
 
-![](https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png "Day 2")
+- *@96 GPU Hours: The model has learned prior probabilities and is selective with predictions. It understands locations (ex. a belt belongs on the waist), but produces false positives.*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_4_of_48.png" alt="Day 4" style="width:400px;"/>
 
-*@96 GPU Hours:*
-- *The model has learned prior probabilities and is selective with predictions. It understands locations (ex. a belt belongs on the waist), but produces false positives.*
-![](https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_4_of_48.png "Day 2")
-
-*@144 GPU Hours:* 
-- *tba*
+- *@120 GPU Hours: Strong improvements in learned priors and selectivity in predictions. It is increasingly accurate on broad categories ("pants"), with intelligent (but incorrect) predictions of auxillary features that belong together with the main category ("pockets, belts").*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_5_of_48.png" alt="Day 5" style="width:300px;"/>
 
 ----
 
