@@ -10,7 +10,7 @@ class Tokenization(tf.keras.layers.Layer):
     """
 
     def __init__(self, vocab_dict, name='Tokenization', **kwargs):
-        super().__init__(self, name=name, **kwargs)
+        super().__init__(name=name, **kwargs)
 
         # attributes
         self.vocab_dict = vocab_dict
@@ -92,7 +92,7 @@ class InverseTokenization(tf.keras.layers.Layer):
     """ Used to convert strings to tokens or multi-hot labels (and vice versa). """
 
     def __init__(self, vocab_dict, name='Tokenization', **kwargs):
-        super().__init__(self, name=name, **kwargs)
+        super().__init__(name=name, **kwargs)
 
         # attributes
         self.vocab_dict = vocab_dict
