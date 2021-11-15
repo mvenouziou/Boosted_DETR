@@ -5,7 +5,7 @@ This is my implementation of the DETR object detector in Tensorflow. It has been
 The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
 
 ---
-**The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to processing to match that... but let's see what my modified DETR can achieve on Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. This model includes an additional prediction head to detect auxillary features in the dataset. (COCO is not annotated in this way.) The dataset also includes many small objects, which official DETR exhibited difficulties with.
+**The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to match that processing power... but let's see what my modified DETR can achieve on a Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. This model uses half as many parameters than the paper's smallest model, and includes an additional prediction head to detect auxillary features in the dataset. (COCO is not annotated in this way.) The dataset also includes many small objects, which official DETR exhibited difficulties with.
 
 - *@48 GPU Hours: a big jumble of many false positives. the model is still getting its bearings.*
 - <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png" alt="Day 2" style="width:200px;"/>
@@ -113,7 +113,7 @@ DETR also replaces the non-trained techniques such as non-max suppression (NMS) 
 ----
 ## Input Formats and Model Parameters
 
-The model expects inputs values to be provided as dictionary of tensors. (Any valid TF format accepting string keys is acceptible). Images should be resized to uniform shape and targets should be padded to a uniform number of objects* (recommend using the max number in the training set.) The choice of image resizing / object padding does not matter, other than to be consistent within each run, but can vary across training runs or inference calls.
+The model expects inputs values to be provided as dictionary of tensors. (Any valid TF format accepting string keys is acceptible). Images should be resized to uniform shape and targets should be padded to the max quanity of objects found in the training set. The choice of image resizing / object padding does not matter, other than to be consistent within each run, but can vary across training runs or inference calls.
 
 #### Mandatory Inference Key
 - **'image'**: RGB image tensors scaled into [0,1]. shape = [batch, height, width, 3]
@@ -128,14 +128,14 @@ The model expects inputs values to be provided as dictionary of tensors. (Any va
 
 ### Model Paramaters
 
-- **num_object_preds:** max number of predictions model is capable of outputing. The DETR paper suggests this will need to be much larger that the max number of objects in a picture. (2x as many in the examples they provided).
-- **image_size:** size images will be resized to for the CNN encoder. (This need not be the size of input images)
-- **num_encoder_blocks:** int >= 0. Number of encoder transformer blocks. Use 0 to skip to only use CNN encoder.
+- **num_object_preds:** max number of predictions the model is capable of outputing. The DETR paper suggests using 2-3 times as many as the max number of objects in a picture.
+- **image_size:** size images will be resized to withing the CNN encoder.
+- **num_encoder_blocks:** int >= 0. Number of encoder transformer blocks.
 - **num_encoder_heads:** int >=1. Number of encoder transformer heads.
-- **encoder_dim:** int multiple of number of encoder heads >=1.
+- **encoder_dim:** int multiple of number of encoder heads.
 - **num_decoder_blocks:** int >=1. Number of decoder transformer heads.
 - **num_decoder_heads:** int >=1. Number of decoder transformer heads.
-- **decoder_dim:** int multiple of number of decoder heads >=1.
+- **decoder_dim:** int multiple of number of decoder heads.
 - **num_panoptic_heads:** (not yet implemented. Can pass None)
 - **panoptic_dim:** (not yet implemented. Can pass 0)
-- **vocab_dict:** Dictionary of form {'category': nonempty list of strings, 'attribute': potentially empty list of strings}. Do not include padding or mask values in these lists.
+- **vocab_dict:** Dictionary of form {'category': nonempty list of strings, 'attribute': potentially empty list of strings}. Do not include padding or mask values in these lists, these will be added automatically by the model.
