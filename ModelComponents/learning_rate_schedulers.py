@@ -10,19 +10,38 @@ lr = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=.00
 # Modified "Attention is All You Need" learning scheduler (to become cyclic)
 class LRScheduleAIAYN(tf.keras.optimizers.schedules.LearningRateSchedule):
 
-    def __init__(self, scale_factor=1.0, warmup_steps=4000):  # defaults reflect paper's values
+    def __init__(self, scale_factor=1.0, warmup_steps=4000, cyclical=False):  # defaults reflect paper's values
         # cast dtypes
         self.warmup_steps = tf.constant(warmup_steps, dtype=tf.float32)
+        self.cyclical = cyclical
+
         dim = tf.constant(352, dtype=tf.float32)
-        self.scale_factor = tf.constant(scale_factor, dtype=tf.float32)
-        
+        self.scale_factor = tf.constant(scale_factor, dtype=tf.float32)        
         self.scale = self.scale_factor * tf.math.pow(dim, -1.5)
 
     def get_config(self):
-        config = {'scale_factor': self.scale_factor, 'warmup_steps': self.warmup_steps}
+        config = {'scale_factor': self.scale_factor, 
+                  'warmup_steps': self.warmup_steps, 'cyclical':self.cyclical}
         return config 
-        
+    
     def __call__(self, step):
+        val = tf.cond(self.cyclical,
+                      lambda: cyclic(step),
+                      lambda: non_cyclic(step))
+        return self.scale * val
+
+    def non_cyclic(self, step):
+        # standard AIAYN, for optimizers with adaptive learning rates
+        step = tf.cast(step, tf.float32)
+        crit = self.warmup_steps
+
+        val = tf.cond(tf.math.less(step, crit),
+                      lambda: step * tf.math.pow(crit, -1.5),  # linear increase
+                      lambda: tf.math.pow(step, -.5)
+                      )
+        return self.scale * val
+
+    def cyclic(self, step):
         step = tf.cast(step, tf.float32)
         crit = self.warmup_steps
 
@@ -34,7 +53,7 @@ class LRScheduleAIAYN(tf.keras.optimizers.schedules.LearningRateSchedule):
                       lambda: step * tf.math.pow(crit, -1.5),  # linear increase
                       lambda: false_fn(step)  # decay
                       )
-        return self.scale * val
+        return self.scale * val      
 
     def display_graph(self):
         print('Learning Rate Schedule')
