@@ -6,25 +6,25 @@ import numpy as np
 
 class Pipeline:
     """
-    Inputs: dataframe of COCO-format annotations, including mandatory columns
-    ['image_path', 'width', 'height'] and optional columns
-    ['bbox', 'category', 'supercategory', 'attribute'].
+    Inputs: dataframe of COCO-format annotations, including mandatory columns 
+    ['image_path', 'width', 'height'] and optional columns 
+    ['bbox', 'category', 'supercategory', 'attribute']. 
 
-    Outputs:
-    - TF dataset object with labelled values ['image_id', 'image', 'bbox',
+    Outputs: 
+    - TF dataset object with labelled values ['image_id', 'image', 'bbox', 
         'category', 'supercategory', 'attribute'].
-    - Labels are provided as ragged tensors to allow for variable numbers of objects per image.
+    - Labels are provided as ragged tensors to allow for variable numbers of objects per image. 
     - Bounding boxes are normalized as floats in [0,1] in same format as they arrived from dataframe
     - Image tensors can be either decoded into tensor or left serialized as jpg/png/gif
     - Image tensors have float values in [0,1] and are resized to uniform shape (user defined)
-    - Image tensors can (optionally) have random augmentations dynamically applied
-    - If any of ['bbox', 'category', 'supercategory', 'attribute'] are missing from the
+    - Image tensors can (optionally) have random augmentations dynamically applied 
+    - If any of ['bbox', 'category', 'supercategory', 'attribute'] are missing from the 
         dataframe, dummy values are output for the missing info.
     """
 
     def __init__(self, image_size, **kwargs):
 
-        self.target_size = image_size
+        self.target_size = image_size   
         self.TRANSLATION_TABLE = str.maketrans({'[':None, ']':None, ',':None, "'":None, '"':None, })
 
         # key labels
@@ -53,7 +53,7 @@ class Pipeline:
     def load_image(self, image_path):
         image_path = tf.squeeze(image_path)
         image = tf.keras.layers.Lambda(lambda x: tf.io.read_file(x))(image_path)
-        return image
+        return image   
 
     def decode_one_image(self, image):
         target_size=self.target_size
@@ -61,54 +61,54 @@ class Pipeline:
         image = tf.keras.layers.Lambda(lambda x: tf.io.decode_image(x, channels=3, expand_animations=False))(image)
         image = tf.keras.layers.experimental.preprocessing.Resizing(*target_size)(image)
         image = tf.cast(image, tf.float32) / 255.0
-        return image
-
+        return image    
+    
     def COCO_to_ymin_xmin_ymax_xmax(self, boxes):
-        return np.concatenate([boxes[:, 1:2],
+        return np.concatenate([boxes[:, 1:2], 
                                boxes[:, 0:1],
                                boxes[:, 1:2] + boxes[:, 3:4],
                                boxes[:, 0:1] + boxes[:, 2:3]], axis=-1)
 
     def ymin_xmin_ymax_xmax_to_COCO(self, boxes):
         return np.concatenate([boxes[:, 0:1],
-                               boxes[:, 1:2],
-                               boxes[:, 2:3] - boxes[:, 0:1],
+                               boxes[:, 1:2],    
+                               boxes[:, 2:3] - boxes[:, 0:1],                            
                                boxes[:, 3:4] - boxes[:, 1:2]], axis=-1)
 
     def COCO_to_VOC(self, boxes):
         return np.concatenate([boxes[:, 0:1],
-                               boxes[:, 1:2],
+                               boxes[:, 1:2], 
                                boxes[:, 0:1] + boxes[:, 2:3],
                                boxes[:, 1:2] + boxes[:, 3:4]], axis=-1)
 
     def VOC_to_COCO(self, boxes):
         return np.concatenate([boxes[:, 0:1],
-                               boxes[:, 1:2],
+                               boxes[:, 1:2], 
                                boxes[:, 2:3] - boxes[:, 0:1],
                                boxes[:, 3:4] - boxes[:, 1:2]], axis=-1)
 
-
+    
     # TF Dataset Creation
-    def data_generator(self, labels_df, decode_images=True, stream_from_directory=False,
+    def data_generator(self, labels_df, decode_images=True, stream_from_directory=False, 
                        box_pad_val=-10.0, string_pad_val='<PAD>'):
-
+        
         """
-        Converts image data into a Tensorflow Dataset.
-        Inputs:
+        Converts image data into a Tensorflow Dataset. 
+        Inputs: 
         parameters: instance of hyper_parameters.Parameters() class
         'stream_from_directory' argument has no effect when labels_df is passed.
 
         Training datasets creation:
         'labels_df' is required and must include columns 'image_path', and 'y_true'.
-
+        
         Inference datasets creation:
-        Pass either a label_df ('image_path' column required) or provide the
+        Pass either a label_df ('image_path' column required) or provide the 
         image directory path string in 'stream_from_directory=image_directory'
         """
 
         # get params
         target_size = self.target_size
-
+        
         # Initial ds creation
         # Option 1: get info from dataframe
         if labels_df is not None:
@@ -119,23 +119,23 @@ class Pipeline:
 
             # Create image path ds
             ds_image_path = tf.data.Dataset.from_tensor_slices(df['image_path'])
-
+            
             # Create image id ds
             ds_image_id = tf.data.Dataset.from_tensor_slices(df['id_num'])
 
             # Create image shape ds
             ds_height = tf.data.Dataset.from_tensor_slices(df['height'])
             ds_width = tf.data.Dataset.from_tensor_slices(df['width'])
-
+            
             # Create num_boxes ds
-            if 'num_boxes' in df.columns:
+            if 'num_boxes' in df.columns: 
                 max_num_obj = df['num_boxes'].max()
                 num_boxes = df['num_boxes']
             else:
                 max_num_obj = 1
                 num_boxes = df['image_path'].apply(lambda x: 0)
             ds_num_objects = tf.data.Dataset.from_tensor_slices(num_boxes)
-
+            
             # Create categories ds
             if 'category' in df.columns:
                 category = df['category']
@@ -143,10 +143,10 @@ class Pipeline:
                 category = df['image_path'].apply(lambda x: [[string_pad_val]])
 
             # create uniform shape tensors
-            category = tf.ragged.constant(category.to_list())
-            category = category.to_tensor(shape=[num_samples, max_num_obj, 1],
+            category = tf.ragged.constant(category.to_list())                
+            category = category.to_tensor(shape=[num_samples, max_num_obj, 1], 
                                             default_value=string_pad_val)
-
+                                            
             ds_category = tf.data.Dataset.from_tensor_slices(category)
 
             # Create attributes ds
@@ -156,10 +156,10 @@ class Pipeline:
                 attribute = df['image_path'].apply(lambda x: [[string_pad_val]])
 
             # create uniform shape tensors
-            attribute = tf.ragged.constant(attribute.to_list())
+            attribute = tf.ragged.constant(attribute.to_list())     
             max_attributes = attribute.bounding_shape()[-1]
-            attribute = attribute.to_tensor(shape=[num_samples, max_num_obj, max_attributes],
-                                            default_value=string_pad_val)
+            attribute = attribute.to_tensor(shape=[num_samples, max_num_obj, max_attributes], 
+                                            default_value=string_pad_val)                                           
             ds_attribute = tf.data.Dataset.from_tensor_slices(attribute)
 
 
@@ -168,37 +168,39 @@ class Pipeline:
                 bbox = df['bbox']
             else:
                 bbox = df['image_path'].apply(lambda x: [[box_pad_val, box_pad_val, box_pad_val, box_pad_val]])
-
+            
             # ##create uniform shape tensors
-            bbox = tf.ragged.constant(df['bbox'].to_list())
-            bbox = bbox.to_tensor(shape=[num_samples, max_num_obj, 4],
+            bbox = tf.ragged.constant(df['bbox'].to_list())                
+            bbox = bbox.to_tensor(shape=[num_samples, max_num_obj, 4], 
                                             default_value=box_pad_val)
-
+                                            
             ds_bbox = tf.data.Dataset.from_tensor_slices(bbox)
 
             # Merge into a single dataset
-            ds = tf.data.Dataset.zip((ds_image_id, ds_image_path, ds_num_objects,
+            ds = tf.data.Dataset.zip((ds_image_id, ds_image_path, ds_num_objects, 
                                 ds_category, ds_attribute, ds_bbox, ds_width, ds_height))
 
             def apply_names(image_id, image_path, num_objects, category, attribute, bbox, width, height):
-                return {'image_id':image_id, 'image_path':image_path,
-                        'num_objects':num_objects, 'category':category,
+                return {'image_id':image_id, 'image_path':image_path, 
+                        'num_objects':num_objects, 'category':category, 
                         'attribute':attribute, 'bbox':bbox, 'width':width, 'height':height}
 
             ds = ds.map(apply_names)
-
-            # shuffle
-            ds = ds.shuffle(50000)
+            ds = ds.cache()
+            
+            # shuffle user buffer = full training set size. 
+            # This must be done *before* loading the image but *after* any caching.
+            ds = ds.shuffle(num_samples)
 
             # decode images into array. (Note: uses tf.io, which requires unbatched images)
             def load(val):
                 image_path = val[self.image_path_key]
-                val[self.image_key] = self.load_image(image_path)
-                del val[self.image_path_key]
+                val[self.image_key] = self.load_image(image_path)      
+                del val[self.image_path_key]          
                 return val
 
             ds = ds.map(load, num_parallel_calls=tf.data.AUTOTUNE)
-
+            
             if decode_images:
                 def decoder(val):
                     image = val[self.image_key]
@@ -206,15 +208,15 @@ class Pipeline:
                     return val
 
                 ds = ds.map(decoder, num_parallel_calls=tf.data.AUTOTUNE)
-
+            
         # Option 2: get info from image file directory
         else:
             image_ds = tf.keras.preprocessing.image_dataset_from_directory(
                 directory=stream_from_directory, labels='inferred', label_mode=None,
-                class_names=None, color_mode='rgb', batch_size=1,
-                image_size=target_size, shuffle=False, seed=None, validation_split=None,
+                class_names=None, color_mode='rgb', batch_size=1, 
+                image_size=target_size, shuffle=False, seed=None, validation_split=None, 
                 subset=None, follow_links=False)
-
+            
             # unbatch (needed for later ops)
             image_ds = image_ds.unbatch()
 
@@ -222,37 +224,37 @@ class Pipeline:
             image_id_ds = tf.data.Dataset.from_tensor_slices(image_ds.file_paths)
             image_id_ds = image_id_ds.map(lambda x: tf.strings.split(x, os.path.sep)[-1],
                                             num_parallel_calls=tf.data.AUTOTUNE)
-
-            if decode_images is False:
+            
+            if decode_images is False:  
                 # convert image to raw byte string. Note: cannot have batch dim for encoding
                 image_ds = image_ds.unbatch()
                 image_ds = image_ds.map(lambda x: tf.cast(x, dtype=tf.uint16))
                 image_ds = image_ds.map(lambda image: tf.io.encode_png(image))
                 image_ds = image_ds.map(lambda image: tf.io.serialize_tensor(image))
-
+            
             # create  placeholder for (unknown) labels
             placeholder_num_obj_ds = image_id_ds.map(lambda x: -1, num_parallel_calls=tf.data.AUTOTUNE)
             placeholder_box_ds = image_id_ds.map(lambda x: [[box_pad_val, box_pad_val, box_pad_val, box_pad_val]], num_parallel_calls=tf.data.AUTOTUNE)
             placeholder_string_ds = image_id_ds.map(lambda x: [[string_pad_val]], num_parallel_calls=tf.data.AUTOTUNE)
-
+                        
             # merge into single dataset
-            ds = tf.data.Dataset.zip((image_ds, image_id_ds, placeholder_string_ds,
+            ds = tf.data.Dataset.zip((image_ds, image_id_ds, placeholder_string_ds, 
                     placeholder_string_ds, placeholder_box_ds, placeholder_num_obj_ds))
 
             # name the elements for interpretability
             def map_names(image, image_id, a, b, c, d):
-                return  {self.image_key: image,
-                         self.image_id_key: image_id,
-                         self.category_key: a,
-                         self.attribute_key: b,
-                         self.bbox_key: c,
+                return  {self.image_key: image, 
+                         self.image_id_key: image_id, 
+                         self.category_key: a, 
+                         self.attribute_key: b, 
+                         self.bbox_key: c, 
                          self.num_objects_key: d}
-
+   
             ds = ds.map(map_names, num_parallel_calls=tf.data.AUTOTUNE)
 
         # display summary
         print(ds.element_spec, '\n')
-
+        
         return ds
 
 
@@ -260,7 +262,7 @@ class Pipeline:
 class Augmentations(Pipeline):
     def __init__(self):
         super().__init__(image_size=None)
-
+        
         """  inherited values
         self.image_path_key = 'image_path'
         self.image_key = 'image'
@@ -273,14 +275,14 @@ class Augmentations(Pipeline):
 
     def random_downsizer_with_pad(self, image, bbox):
         """ Randomly shrinks image (doesn't preserve aspect ratio), shifts it
-         and pads back to original size with whitespace. Bounding box values
+         and pads back to original size with whitespace. Bounding box values 
          are adjusted accordingly. """
-
+        
         # choose random downsizing factors between 1 and ~3
         # choice is heavily weighted towards 1 (i.e. no change in size)
         rand_val = tf.math.maximum(1.0, tf.random.truncated_normal(
                         shape=([2]), mean=0.5, stddev=0.7))
-
+        
         # get shapes
         orig_shape = tf.shape(image)[-3:-1]
         orig_shape_float = tf.cast(orig_shape, dtype=rand_val.dtype)
@@ -290,11 +292,11 @@ class Augmentations(Pipeline):
         new_shape = orig_shape_float / rand_val
         new_shape = tf.cast(new_shape, dtype=orig_shape.dtype)
         image = tf.image.resize(image, size=new_shape)
-
+        
         # ## random shift values
-        offset_height = tf.random.uniform(minval=0, maxval= orig_shape[0] - new_shape[0] + 1,
+        offset_height = tf.random.uniform(minval=0, maxval= orig_shape[0] - new_shape[0] + 1,  
                                           shape=[], dtype=orig_shape.dtype)
-        offset_width = tf.random.uniform(minval=0, maxval= orig_shape[1] - new_shape[1] + 1,
+        offset_width = tf.random.uniform(minval=0, maxval= orig_shape[1] - new_shape[1] + 1,  
                                          shape=[], dtype=orig_shape.dtype)
 
         # ## pad back to orig size with whitespace
@@ -305,11 +307,11 @@ class Augmentations(Pipeline):
         # ## downscale box
         denom =  [tf.concat([rand_val, rand_val], axis=-1)]
         bbox = bbox / denom
-
+        
         # ## normalize shift values
         offset_height = tf.cast(offset_height / orig_shape[0], dtype=bbox.dtype)
         offset_width = tf.cast(offset_width / orig_shape[1], dtype=bbox.dtype)
-
+        
         # ## shift boxes
         shift = tf.concat([[[offset_height]], [[offset_width]], [[offset_height]], [[offset_width]]], axis=-1)
         bbox = bbox + shift
@@ -317,25 +319,25 @@ class Augmentations(Pipeline):
         return image, bbox
 
     ## random contrast
-    def random_contrast(self, image, lower=.8, upper=1.2):
+    def random_contrast(self, image, lower=.7, upper=1.3):
         image = tf.image.random_contrast(image, lower=lower, upper=upper)
         return image
 
     ## random brightness
-    def random_brightness(self, image, max_delta=.1):
+    def random_brightness(self, image, max_delta=.3):
         image = tf.image.random_brightness(image, max_delta=max_delta)
         return image
 
     ## random image quality
-    def random_quality(self, image, min_quality=70, max_quality=100):
+    def random_quality(self, image, min_quality=50, max_quality=100):
         image_shape = tf.shape(image)
-        image = tf.image.random_jpeg_quality(image, min_jpeg_quality=min_quality,
+        image = tf.image.random_jpeg_quality(image, min_jpeg_quality=min_quality, 
                                              max_jpeg_quality=max_quality)
         image = tf.reshape(image, [image_shape[0], image_shape[1], image_shape[2]])
         return image
 
     ## random saturation
-    def random_saturation(self, image, min_saturation=.8, max_saturation=1.2):
+    def random_saturation(self, image, min_saturation=.7, max_saturation=1.3):
         image = tf.image.random_saturation(image, lower=min_saturation, upper=max_saturation)
         return image
 
@@ -344,15 +346,15 @@ class Augmentations(Pipeline):
     def apply_image_augmentations(self, dataset):
         # NOTE: dataset elements arrive nbatched as dict with 'image' in keys
 
-        # random_downsizer_with_pad.
+        # random_downsizer_with_pad. 
         def temp_mapper(val):
             image = val[self.image_key]
             bbox = val[self.bbox_key]
             val[self.image_key], val[self.bbox_key] = self.random_downsizer_with_pad(image, bbox)
             return val
-
+        
         dataset = dataset.map(temp_mapper, num_parallel_calls=tf.data.AUTOTUNE)
-
+        
         # random_contrast
         def temp_mapper(val):
             image = val[self.image_key]
@@ -406,7 +408,7 @@ class TFRecordsConversions(Pipeline):
             num_shards = num_shards + 1
 
         return num_shards
-
+    
     # ## Conversion: Tensor - > Example
     def _bytes_feature(self, x):
         """Returns a bytes_list from a flat string / byte."""
@@ -453,7 +455,7 @@ class TFRecordsConversions(Pipeline):
 
         return bbox, attribute, category, num_objects, image_id, image
 
-    def tf_serialize_example(self, *x):
+    def tf_serialize_example(self, *x):        
         tf_string = tf.py_function(self.serialize_example, [*x], tf.string)
         return tf.reshape(tf_string, ()) # The result is a scalar.
 
@@ -467,14 +469,14 @@ class TFRecordsConversions(Pipeline):
         file_number = 0
 
         while elements_remaining:
-
+            
             # create dataset segment for next record
-            try:
+            try:  
                 ds_i = ds.skip(file_number*files_per_shard).take(files_per_shard)
             except:
                 elements_remaining = False
                 break
-
+            
             # write next record
             filename = f'{name_qualifier}_data_{file_number}.tfrecord'
             writer = tf.data.experimental.TFRecordWriter(filename)
@@ -488,17 +490,17 @@ class TFRecordsConversions(Pipeline):
 
         print(f'Completed. {file_number} files written.')
         return None
-
-
+    
+    
     # ## Conversion: Example -> Tensor
     def decode_one_image(self, image):
         target_size = self.image_size
 
-        image = tf.keras.layers.Lambda(lambda x: tf.io.decode_image(x, channels=3,
+        image = tf.keras.layers.Lambda(lambda x: tf.io.decode_image(x, channels=3, 
                                                  expand_animations=False))(image)
         image = tf.keras.layers.experimental.preprocessing.Resizing(*target_size)(image)
         image = tf.cast(image, tf.float32) / 255.0
-        return image
+        return image   
 
     def decode_one_float(self, x):
         x = tf.io.parse_tensor(x, out_type=tf.float32)

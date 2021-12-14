@@ -109,7 +109,6 @@ class MatchingLoss(tf.keras.layers.Layer):
         self.MatchingMetric = MatchingMetric()
 
     def call(self, inputs):
-
         y_true, y_pred = inputs
 
         category, attribute, bbox, num_objects = y_true
@@ -154,41 +153,90 @@ class MatchingLoss(tf.keras.layers.Layer):
         losses = [total_loss, category_cost, attribute_cost, box_cost, exist_cost]
 
         # compute metrics
-        masked_iou = self.MatchingMetric([y_true, y_pred], assignment_mask)
-        masked_iou = tf.reduce_sum(masked_iou, axis=[1,2]) / total_num_objects
+        masked_iou = 0
+        #masked_iou = self.MatchingMetric([y_true, y_pred], assignment_mask)
+        #masked_iou = tf.reduce_sum(masked_iou, axis=[1,2]) / total_num_objects
 
         metrics = [masked_iou]
         return losses, metrics
 
 
 class MatchingMetric(tf.keras.layers.Layer):
+    ##### TODO: needs to be rewritten for mAP results
     def __init__(self, name='MatchingMetric', **kwargs):
         super().__init__(name=name, dtype=tf.float32, **kwargs)
 
         # layers
-        self.MatchingMask = MatchingMask()
-        self.CostArray = CostArray()
-        self.apply_mask = apply_mask
+        self.exist_thresholds = [n*.05 for n in range(21)]  # [0, .05, ... .95, 1.0]
+        self.iou_thresholds = [.50, .75, .95]
 
         # metrics
         self.IOU_Metric = IOU_Metric
 
-    def call(self, inputs, assignment_mask=None):
-        y_true, y_pred = inputs
+    def get_hard_preds(self, soft_preds):
+        cat_preds, attribute_preds, box_preds = soft_preds
 
+        # determine existence confidence and class predictions
+        existence_pred = 1.0 - cat_preds[..., :0]  # 1 - "None" category score
+        class_pred = tf.argmax(cat_preds, axis=-1)  # top scoring category
+        att_pred = attribute_preds > .5
+
+        predictions = [existence_pred, class_pred, att_pred, box_preds]
+
+        return predictions
+
+    def precision_recall(self, y_true, hard_preds, class_indx, iou_thresh, exist_thresh):
+        ############ need to code this
         category, attribute, bbox, num_objects = y_true
-        cat_preds, attribute_preds, box_preds = y_pred
+        existence_pred, class_pred, att_pred, box_preds = hard_preds
 
-        # get matching assignment mask
-        if assignment_mask is None:
-            assignment_mask, assigned_predictions = self.MatchingMask(
-                            [(category, bbox, num_objects), (cat_preds, box_preds)])
+        # loop over objects?
 
-        # get masked, pairwise metric
-        masked_iou = self.CostArray(bbox, box_preds, self.IOU_Metric)
-        masked_iou = self.apply_mask(assignment_mask, masked_iou)
+        precision = 0.0  # placeholder!!!
+        recall = 0.0  # placeholder!!!
+        return precision, recall
+        
 
-        metrics = [masked_iou]
+    def call(self, inputs, assignment_mask=None):
+        ######## need to remove loops
+        y_true, y_pred = inputs
+        
+        category, attribute, bbox, num_objects = y_true
+        soft_preds = y_pred
+
+        num_classes = tf.shape(category)[-1]
+
+        # get single prediction for each predicted box
+        predictions = self.get_hard_preds(soft_preds)
+
+        # get precision and recall values
+        mAP = []
+
+        for iou_thresh in self.iou_thresholds:
+            class_AP = []
+
+            for category_indx in range(1, num_classes):  # skip "None" category
+                prev_precision = 1.0
+                prev_recall = 0.0
+                AUC = 0.0
+
+                for exist_thresh in self.exist_thresholds:
+                    precision, recall = self.precision_recall(
+                        y_true, hard_preds, category_indx, iou_thresh, exist_thresh)
+
+                    segment_area = (prev_precision - precision) * (recall - prev_recall)
+                    AUC = AUC + segment_area
+
+                    # prepare for next iteration
+                    prev_precision = precision
+                    prev_recall = recall
+
+                class_AP.append(AUC)
+
+            AP = tf.reduce_mean(class_AP)
+            mAP.append(AP)
+
+        metrics = [mAP]  
         return metrics
 
 
