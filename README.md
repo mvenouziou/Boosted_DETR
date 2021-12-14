@@ -7,14 +7,18 @@ The description below outlines unique features, novel model architectures ideas,
 ---
 **The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to match that processing power... but let's see what my modified DETR can achieve on a Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. This model uses half as many parameters than the paper's smallest model, and includes an additional prediction head to detect auxillary features in the dataset. (COCO is not annotated in this way.) The dataset also includes many small objects, which official DETR exhibited difficulties with.
 
-- *@48 GPU Hours: a big jumble of many false positives. the model is still getting its bearings.*
-- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png" alt="Day 2" style="width:200px;"/>
+- *@144 GPU Hours: Improved detection typically with high or perfect recall. Sample validation image with all annotations detected (glasses, watch, pants, tshirt and neckline). False positives are still common (pockets, buckles and ruffles are commonly included).*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/b2addd3fd2925aa95f09256a71dced577d8e785d/validation_sample_image_day_6_of_48-3.png" alt="Day 6" style="width:400px;"/>
+
+- *@120 GPU Hours: Strong improvements in learned priors and selectivity in predictions. It is increasingly accurate on broad categories ("pants"), with intelligent (but incorrect) predictions of auxillary features that belong together with the main category ("pockets, belts").*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_5_of_48.png" alt="Day 5" style="width:300px;"/>
 
 - *@96 GPU Hours: The model has learned prior probabilities and is selective with predictions. It understands locations (ex. a belt belongs on the waist), but produces false positives.*
 - <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_4_of_48.png" alt="Day 4" style="width:400px;"/>
 
-- *@120 GPU Hours: Strong improvements in learned priors and selectivity in predictions. It is increasingly accurate on broad categories ("pants"), with intelligent (but incorrect) predictions of auxillary features that belong together with the main category ("pockets, belts").*
-- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_5_of_48.png" alt="Day 5" style="width:300px;"/>
+- *@48 GPU Hours: a big jumble of many false positives. The model takes time to get its bearings.*
+- <img src="https://github.com/mvenouziou/DETR_for_TF/blob/main/validation_sample_image_day_%202_of_48.png" alt="Day 2" style="width:200px;"/>
+
 
 ----
 
