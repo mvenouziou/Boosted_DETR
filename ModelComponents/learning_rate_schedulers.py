@@ -26,8 +26,8 @@ class LRScheduleAIAYN(tf.keras.optimizers.schedules.LearningRateSchedule):
     
     def __call__(self, step):
         val = tf.cond(self.cyclical,
-                      lambda: self.cyclic(step),
-                      lambda: self.non_cyclic(step))
+                      lambda: cyclic(step),
+                      lambda: non_cyclic(step))
         return self.scale * val
 
     def non_cyclic(self, step):

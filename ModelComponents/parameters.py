@@ -159,12 +159,12 @@ class ModelParameters:
         
     def default_params(self, value=None):
         parameters = {'image_size': self._image_size,
-                       'encoder_dim': 128,
+                       'encoder_dim': 256,
                        'num_encoder_blocks': 4,
                        'num_encoder_heads': 8,
-                       'num_decoder_blocks': 8,  # MUST be >= 1
+                       'num_decoder_blocks': 4,  # MUST be >= 1
                        'num_decoder_heads': 8,
-                       'decoder_dim': 128,
+                       'decoder_dim': 256,
                        'num_panoptic_heads': 1,
                        'panoptic_dim': 32,
                        'num_object_preds': self._num_object_preds,

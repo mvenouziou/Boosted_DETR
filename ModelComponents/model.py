@@ -30,8 +30,8 @@ class DETR(tf.keras.Model):
     def __init__(self, num_object_preds, image_size,
                        num_encoder_blocks, num_encoder_heads, encoder_dim,
                        num_decoder_blocks, num_decoder_heads, decoder_dim,
-                       num_panoptic_heads, panoptic_dim, 
-                       vocab_dict, attribute_weight=1000.0, name='DETR', **kwargs):
+                       num_panoptic_heads, panoptic_dim, vocab_dict, 
+                       classification_only=False, attribute_weight=1.0, name='DETR', **kwargs):
         super().__init__(name=name)
 
         # loss weights. 
@@ -40,6 +40,9 @@ class DETR(tf.keras.Model):
         category_weight = None  # will use default weight
         box_weight = None  # will use default weight
         exist_weight = None  # will use default weight
+
+        if classification_only:
+            box_weight = 0.0
 
         self.num_object_preds = num_object_preds  # ideally >> max objects in training set
         self.image_size = image_size
@@ -215,7 +218,7 @@ class DETR(tf.keras.Model):
 
             # report metrics (from final step)
             iou_metric_i = metrics_i[0]
-            # self.add_metric(iou_metric_i, 'IOU')  ##### needs to be rewritten for mAP results
+            self.add_metric(iou_metric_i, 'IOU')
 
             return y_pred
 
