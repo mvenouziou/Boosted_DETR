@@ -1,10 +1,23 @@
-# DETR for Tensorflow
+# Boosted DETR for Tensorflow
 
-This is my implementation of the DETR object detector in Tensorflow. It has been coded from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. Although I did not make use of their repository, the [official PyTorch implementation](https://github.com/facebookresearch/detr/tree/master) deserves citation.
+This is an original adaptation of the DETR model that:
+- Uses a boosted model structure  
+- Includes (optional) 'attributes' prediction head for fine-grained features
 
-The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
+Small encoder-transformer blocks with individual prediction heads serve as the 'weak learners.' Unlike standard DETR, each encoder block is connected tightly to a specific decoder block, and intermediate predictions are the sum of results from all prediction heads to that point. It is intended for model training to follow the traditional boosted ensemble approach where each 'weak learner' is trained with all earlier learners held fixed, although this is optional.
+
+*(TODO: add an early exit path for model inference, where final predictions are produced once prediction confidence reaches a desired threshold. This will provide an adaptive model size where 'easy' images are processed more quickly.)*
+
+This model has been coded in Tensorflow from first principles as presented in the paper [End-to-End Object Detection with Transformers](https://ai.facebook.com/research/publications/end-to-end-object-detection-with-transformers) by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and Sergey Zagoruyko. Although I did not make use of their repository, the [official PyTorch implementation](https://github.com/facebookresearch/detr/tree/master) deserves citation.
+
 
 ---
+## NOTE: An updated 'readme' for the boosted model is forthcoming. Below is my original description and training progress for my Tensorflow adaptation of the original DETR model.
+
+
+---
+The description below outlines unique features, novel model architectures ideas, and a brief history of concepts leading to DETR.
+
 **The Official DETR was trained on COCO for the equivalent of 1152 GPU hours!** I have nothing remotely close to match that processing power... but let's see what my modified DETR can achieve on a Google Colab setup training on the smaller Fashionpedia (COCO-format) dataset. This model uses half as many parameters than the paper's smallest model, and includes an additional prediction head to detect auxillary features in the dataset. (COCO is not annotated in this way.) The dataset also includes many small objects, which official DETR exhibited difficulties with.
 
 - *@144 GPU Hours: Improved detection typically with high or perfect recall. Sample validation image with all annotations detected (glasses, watch, pants, tshirt and neckline). False positives are still common (pockets, buckles and ruffles are commonly included).*
