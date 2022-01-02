@@ -156,3 +156,8 @@ The model expects inputs values to be provided as dictionary of tensors. (Any va
 - **num_panoptic_heads:** (not yet implemented. Can pass None)
 - **panoptic_dim:** (not yet implemented. Can pass 0)
 - **vocab_dict:** Dictionary of form {'category': nonempty list of strings, 'attribute': potentially empty list of strings}. Do not include padding or mask values in these lists, these will be added automatically by the model.
+
+
+### License
+
+All original components of my model are released under the [MIT License](https://github.com/mvenouziou/Boosted_DETR/blob/main/LICENSE). See [official DETR implementation](https://github.com/facebookresearch/detr/blob/master/LICENSE) for licensing info on components designed by the original authors.
